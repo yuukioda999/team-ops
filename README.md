@@ -50,6 +50,22 @@ make up      # 全サービスを起動
 | Mailpit(受信したメール) | http://localhost:8025 |
 | Grafana(トレース・メトリクス・ログ) | http://localhost:3000 |
 
+### ログインしてみる
+
+ローカルはデモモードで動き、実在のアドレスにはメールを送りません(宛先は `.invalid` で終わるアドレスだけ)。
+
+1. http://localhost:5173 を開き、`coach@example.invalid` のようなアドレスを入力して「ログイン用のリンクを送る」を押す
+2. http://localhost:8025(Mailpit)で届いたメールを開き、リンクを押す
+3. 「ログインする」を押し、表示名を登録する。続けてチームを作成できる
+
+メールは Web → API(アウトボックス)→ notify-relay → Mailpit の順に届きます。
+
+### テスト
+
+```sh
+make test   # API(team_ops_test を使う)、Web、notify-relay(notify_relay_test を使う)
+```
+
 `make help` でコマンドの一覧を表示できます。障害訓練用に `make chaos-smtp`(SMTPエラーを発生)と `make chaos-relay-down`(配信サービスを停止)を用意しています。
 
 ## 資料

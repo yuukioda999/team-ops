@@ -13,5 +13,7 @@ GRANT ALL PRIVILEGES ON notify_relay.* TO 'notify_relay'@'%';
 -- Test databases used by each service's automated tests.
 CREATE DATABASE IF NOT EXISTS team_ops_test CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 GRANT ALL PRIVILEGES ON team_ops_test.* TO 'team_ops'@'%';
+CREATE DATABASE IF NOT EXISTS notify_relay_test CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+GRANT ALL PRIVILEGES ON notify_relay_test.* TO 'notify_relay'@'%';
 
 FLUSH PRIVILEGES;
