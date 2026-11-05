@@ -1,0 +1,63 @@
+name: Smoke test (whole environment)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  up:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: team-ops
+      - uses: actions/checkout@v4
+        with:
+          repository: yuukioda999/team-ops-api
+          path: team-ops-api
+      - uses: actions/checkout@v4
+        with:
+          repository: yuukioda999/team-ops-web
+          path: team-ops-web
+      - uses: actions/checkout@v4
+        with:
+          repository: yuukioda999/notify-relay
+          path: notify-relay
+
+      - name: Validate compose.yaml
+        working-directory: team-ops
+        run: make config
+
+      - name: Start every service
+        working-directory: team-ops
+        run: docker compose up -d --build
+
+      - name: Wait for health endpoints
+        run: |
+          check() {
+            for i in $(seq 1 90); do
+              if curl -fsS "$1" > /dev/null; then echo "OK  $1"; return 0; fi
+              sleep 5
+            done
+            echo "TIMEOUT  $1"; return 1
+          }
+          check http://localhost:8080/healthz
+          check http://localhost:8000/api/health
+          check http://localhost:8025/api/v1/info
+          check http://localhost:5173/
+
+      - name: Show logs on failure
+        if: failure()
+        working-directory: team-ops
+        run: docker compose logs --no-color --tail=200
+
+      - name: Stop
+        if: always()
+        working-directory: team-ops
+        run: docker compose down -v

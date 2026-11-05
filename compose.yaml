@@ -1,0 +1,102 @@
+# Local development environment for team-ops.
+# Expects the four repositories side by side:
+#   team-ops/  team-ops-api/  team-ops-web/  notify-relay/
+# Run `make setup` once, then `make up`.
+
+name: team-ops
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./env/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  mailpit:
+    image: axllent/mailpit:latest
+    environment:
+      MP_ENABLE_CHAOS: "true"
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      - "8025:8025"   # web UI: received mail
+      - "1025:1025"   # SMTP
+
+  otel-lgtm:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - "3000:3000"   # Grafana
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+
+  api:
+    build:
+      context: ../team-ops-api
+      target: dev
+    volumes:
+      - ../team-ops-api:/app
+    env_file:
+      - ./env/api.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  api-worker:
+    build:
+      context: ../team-ops-api
+      target: dev
+    volumes:
+      - ../team-ops-api:/app
+    env_file:
+      - ./env/api.env
+    command: ["php", "artisan", "queue:work", "--tries=3"]
+    depends_on:
+      api:
+        condition: service_started
+
+  notify-relay:
+    build:
+      context: ../notify-relay
+    environment:
+      PORT: "8080"
+      DEMO_MODE: "true"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      DB_DSN: "notify_relay:notify_relay@tcp(mysql:3306)/notify_relay?parseTime=true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-lgtm:4318"
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+
+  web:
+    build:
+      context: ../team-ops-web
+      target: dev
+    volumes:
+      - ../team-ops-web:/app
+      - web-node-modules:/app/node_modules
+    environment:
+      API_PROXY_TARGET: "http://api:8000"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  mysql-data:
+  web-node-modules:

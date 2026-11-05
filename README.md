@@ -4,7 +4,7 @@
 
 このリポジトリは**入口**です。開発環境(全サービスの一括起動)と、システム全体の資料を置いています。
 
-> **現在の状況:設計中(2026年11月)**
+> **現在の状況:開発中(2026年11月)。開発環境・CI・各サービスの雛形を構築済み**
 > 要件定義・設計判断(ADR)・受け入れ基準付きの機能仕様を作成済みです。第1弾は2027年1月にデモ環境として公開予定です。
 
 ## このプロジェクトの特徴
@@ -23,7 +23,7 @@
 | [team-ops-web](https://github.com/yuukioda999/team-ops-web) | React + TypeScript | スマホ向けのWeb画面 |
 | [notify-relay](https://github.com/yuukioda999/notify-relay) | Go 1.26 | メール配信サービス(OSS)。流量制御・再送・二重配信の防止 |
 
-## ローカルでの起動(準備中)
+## ローカルでの起動
 
 4つのリポジトリを同じフォルダに並べて、team-ops から起動します。
 
@@ -39,8 +39,18 @@
 git clone https://github.com/yuukioda999/team-ops.git
 cd team-ops
 make setup   # 残り3つのリポジトリを隣に clone
-make up      # 全サービスを起動し、デモデータを投入
+make up      # 全サービスを起動
 ```
+
+| 画面 | URL |
+|---|---|
+| Web | http://localhost:5173 |
+| API | http://localhost:8000/api/health |
+| notify-relay | http://localhost:8080/healthz |
+| Mailpit(受信したメール) | http://localhost:8025 |
+| Grafana(トレース・メトリクス・ログ) | http://localhost:3000 |
+
+`make help` でコマンドの一覧を表示できます。障害訓練用に `make chaos-smtp`(SMTPエラーを発生)と `make chaos-relay-down`(配信サービスを停止)を用意しています。
 
 ## 資料
 
