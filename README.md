@@ -50,6 +50,26 @@ make up      # 全サービスを起動
 | Mailpit(受信したメール) | http://localhost:8025 |
 | Grafana(トレース・メトリクス・ログ) | http://localhost:3000 |
 
+### ログインしてみる
+
+ローカルはデモモードで動き、実在のアドレスにはメールを送りません(宛先は `.invalid` で終わるアドレスだけ)。
+
+1. http://localhost:5173 を開き、`coach@example.invalid` のようなアドレスを入力して「ログイン用のリンクを送る」を押す
+2. http://localhost:8025(Mailpit)で届いたメールを開き、リンクを押す
+3. 「ログインする」を押し、表示名を登録する。続けてチームを作成できる
+
+メールは Web → API(アウトボックス)→ notify-relay → Mailpit の順に届きます。
+
+### テスト
+
+```sh
+make test   # API(team_ops_test を使う)、Web、notify-relay(notify_relay_test を使う)
+```
+
+テスト用のDB(`notify_relay_test` など)は、MySQL のデータ領域を初めて作るときに用意されます。以前に `make up` したことがある場合は、`docker compose down -v` で一度作り直してください(ローカルのデータは消えます)。
+
+初回の `make up` は、依存関係のインストールとDBの準備で数分かかります。`make ps` で api が healthy になれば使えます。
+
 `make help` でコマンドの一覧を表示できます。障害訓練用に `make chaos-smtp`(SMTPエラーを発生)と `make chaos-relay-down`(配信サービスを停止)を用意しています。
 
 ## 資料

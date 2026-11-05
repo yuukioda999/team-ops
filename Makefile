@@ -23,6 +23,8 @@ up: ## Start every service (API, worker, relay, web, MySQL, Mailpit, Grafana)
 	@echo "  Relay    http://localhost:8080/healthz"
 	@echo "  Mailpit  http://localhost:8025   (received mail)"
 	@echo "  Grafana  http://localhost:3000   (traces, metrics, logs)"
+	@echo ""
+	@echo "  Log in: enter any address ending in .invalid (demo mode), then open the link in Mailpit"
 
 down: ## Stop every service
 	$(COMPOSE) down
@@ -40,14 +42,15 @@ config: ## Validate compose.yaml
 
 test: test-api test-web test-relay ## Run the tests of all three services
 
+# The tests reset their database: point them at team_ops_test, never at the development data
 test-api:
-	$(COMPOSE) exec api php artisan test
+	$(COMPOSE) exec -e DB_DATABASE=team_ops_test api php artisan test
 
 test-web:
 	cd ../team-ops-web && npm test
 
 test-relay:
-	cd ../notify-relay && go test -race ./...
+	cd ../notify-relay && RELAY_TEST_DSN='notify_relay:notify_relay@tcp(127.0.0.1:3306)/notify_relay_test' go test -race ./...
 
 demo-reset: ## Delete all demo teams and rebuild the template team (same as the nightly job)
 	$(COMPOSE) exec api php artisan demo:reset
