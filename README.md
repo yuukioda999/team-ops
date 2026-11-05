@@ -64,7 +64,10 @@ make up      # 全サービスを起動
 
 ```sh
 make test   # API(team_ops_test を使う)、Web、notify-relay(notify_relay_test を使う)
+make e2e    # 起動中の環境に対して、ブラウザで 001 の流れを通しで確かめる(Node.js が必要)
 ```
+
+`make e2e` は [e2e/](e2e/) の Playwright のテストです。ログイン用リンクのメールは Mailpit の API から読み取ります。CI(smoke)でも `make up` 相当の環境に対して毎回動かしています。
 
 テスト用のDB(`notify_relay_test` など)は、MySQL のデータ領域を初めて作るときに用意されます。以前に `make up` したことがある場合は、`docker compose down -v` で一度作り直してください(ローカルのデータは消えます)。
 

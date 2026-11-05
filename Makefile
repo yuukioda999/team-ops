@@ -3,7 +3,7 @@ SIBLINGS := team-ops-api team-ops-web notify-relay
 GITHUB   := https://github.com/yuukioda999
 COMPOSE  := docker compose
 
-.PHONY: help setup up down restart logs ps test test-api test-web test-relay demo-reset \
+.PHONY: help setup up down restart logs ps test test-api test-web test-relay e2e demo-reset \
         chaos-smtp chaos-smtp-off chaos-relay-down chaos-relay-up config
 
 help: ## Show available commands
@@ -51,6 +51,10 @@ test-web:
 
 test-relay:
 	cd ../notify-relay && RELAY_TEST_DSN='notify_relay:notify_relay@tcp(127.0.0.1:3306)/notify_relay_test' go test -race ./...
+
+# Runs in a real browser against the environment from `make up` (mail is read from Mailpit)
+e2e: ## Run the end-to-end tests against the running environment
+	cd e2e && npm ci && npx playwright install chromium && npx playwright test
 
 demo-reset: ## Delete all demo teams and rebuild the template team (same as the nightly job)
 	$(COMPOSE) exec api php artisan demo:reset

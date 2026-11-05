@@ -1,0 +1,15 @@
+{
+  "name": "team-ops-e2e",
+  "private": true,
+  "description": "End-to-end tests against the whole local environment (make up)",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  }
+}

@@ -12,7 +12,7 @@ permissions:
 jobs:
   up:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,6 +51,33 @@ jobs:
           check http://localhost:8000/api/health
           check http://localhost:8025/api/v1/info
           check http://localhost:5173/
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: team-ops/e2e/package-lock.json
+
+      - name: Install the end-to-end tests
+        working-directory: team-ops/e2e
+        run: |
+          npm ci
+          npm run typecheck
+          npx playwright install --with-deps chromium
+
+      - name: End-to-end tests (001)
+        working-directory: team-ops/e2e
+        run: npx playwright test
+
+      - name: Keep the screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            team-ops/e2e/test-results
+            team-ops/e2e/playwright-report
+          retention-days: 14
 
       - name: Show logs on failure
         if: failure()
