@@ -66,6 +66,10 @@ make up      # 全サービスを起動
 make test   # API(team_ops_test を使う)、Web、notify-relay(notify_relay_test を使う)
 ```
 
+テスト用のDB(`notify_relay_test` など)は、MySQL のデータ領域を初めて作るときに用意されます。以前に `make up` したことがある場合は、`docker compose down -v` で一度作り直してください(ローカルのデータは消えます)。
+
+初回の `make up` は、依存関係のインストールとDBの準備で数分かかります。`make ps` で api が healthy になれば使えます。
+
 `make help` でコマンドの一覧を表示できます。障害訓練用に `make chaos-smtp`(SMTPエラーを発生)と `make chaos-relay-down`(配信サービスを停止)を用意しています。
 
 ## 資料
