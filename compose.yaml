@@ -65,6 +65,20 @@ services:
       api:
         condition: service_started
 
+  # Runs scheduled commands such as outbox:redispatch every minute (ADR-0002)
+  api-scheduler:
+    build:
+      context: ../team-ops-api
+      target: dev
+    volumes:
+      - ../team-ops-api:/app
+    env_file:
+      - ./env/api.env
+    command: ["php", "artisan", "schedule:work"]
+    depends_on:
+      api:
+        condition: service_started
+
   notify-relay:
     build:
       context: ../notify-relay
@@ -73,6 +87,10 @@ services:
       DEMO_MODE: "true"
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
+      SMTP_TLS: none # Mailpit only; real mail services use starttls or tls
+      # Local-only dummy signing key, shared with env/api.env (NOTIFY_RELAY_SECRET)
+      ALLOW_LOCAL_SIGNING_KEY: "true" # the dummy key below is public; refused without this
+      RELAY_SIGNING_KEYS: "local:bG9jYWwtZGV2LXJlbGF5LXNpZ25pbmcta2V5LTAwMDE="
       DB_DSN: "notify_relay:notify_relay@tcp(mysql:3306)/notify_relay?parseTime=true"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-lgtm:4318"
     ports:

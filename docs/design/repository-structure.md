@@ -127,9 +127,10 @@ APIとの型は、team-ops-api のOpenAPIから自動生成し、手書きしな
 |---|---|---|
 | web | React SPA | http://localhost:5173 |
 | api | Laravel API | http://localhost:8000 |
-| api-worker | アウトボックス送信、定期処理 | — |
-| notify-relay | Go配信サービス | — |
-| mysql | team_ops / notify_relay の2スキーマ | — |
+| api-worker | キューのジョブ(アウトボックスの送信) | なし |
+| api-scheduler | 定期処理(送り損ねた依頼の拾い直し、毎分) | なし |
+| notify-relay | Go配信サービス | なし |
+| mysql | team_ops / notify_relay の2スキーマ | なし |
 | mailpit | 送信メールの受け止め(外部には送らない) | http://localhost:8025 |
 | otel-lgtm | Grafana一式(トレース・メトリクス・ログ) | http://localhost:3000 |
 
