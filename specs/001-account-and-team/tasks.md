@@ -4,7 +4,7 @@ plan.md をもとにした作業の一覧。上から順に進める。各タス
 
 凡例:`[api]` team-ops-api、`[relay]` notify-relay、`[web]` team-ops-web、`[ops]` team-ops
 
-**進み具合(2026-11-06):T01〜T31 完了。T32 は後の作業。** T30 の最終レビューで残った要判断の項目は [review-t30.md](review-t30.md) にある。
+**進み具合(2026-11-06):T01〜T31 完了。T32〜T35 は後の作業。** T30 の最終レビューの指摘と判断は [review-t30.md](review-t30.md) にある。
 
 ## 1. 土台
 
@@ -72,6 +72,14 @@ plan.md をもとにした作業の一覧。上から順に進める。各タス
 | No. | 作業 | 対象 | 受け入れ基準 |
 |---|---|---|---|
 | T32 | Laravel から notify-relay への依頼に traceparent を付け、受付から送信までを同じトレースIDで追えるようにする | api、relay | AC-R001-25 |
+
+## あとで行う作業(001 の最終レビューの判断で追加)
+
+| No. | 作業 | いつ | 対象 | 受け入れ基準・根拠 |
+|---|---|---|---|---|
+| T33 | notify-relay の毎日の削除処理(受付から7日で、依頼・配信記録・重複防止キーを消す) | 005 の前 | relay | AC-R001-22 |
+| T34 | TeamPolicy を作り、チームの操作の権限判定をすべて Policy に集める | 004 の最初 | api | review-t30.md の E |
+| T35 | 本番用のイメージを php-fpm と nginx、または FrankenPHP にする(`php artisan serve` をやめる) | デモサーバーを決めるとき | api | review-t30.md の I |
 
 ## レビューで止まるところ
 

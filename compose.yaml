@@ -11,7 +11,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: root
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306" # this machine only: root/root
     volumes:
       - mysql-data:/var/lib/mysql
       - ./env/mysql/init:/docker-entrypoint-initdb.d:ro
@@ -28,8 +28,9 @@ services:
       MP_SMTP_AUTH_ACCEPT_ANY: "true"
       MP_SMTP_AUTH_ALLOW_INSECURE: "true"
     ports:
-      - "8025:8025"   # web UI: received mail
-      - "1025:1025"   # SMTP
+      # This machine only: the received mail holds login links
+      - "127.0.0.1:8025:8025"   # web UI: received mail
+      - "127.0.0.1:1025:1025"   # SMTP
 
   otel-lgtm:
     image: grafana/otel-lgtm:latest
@@ -94,6 +95,7 @@ services:
       context: ../notify-relay
     environment:
       PORT: "8080"
+      # Recipients outside .invalid are refused (the relay calls this demo mode; same as RECIPIENTS_INVALID_ONLY on the API)
       DEMO_MODE: "true"
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
@@ -101,8 +103,10 @@ services:
       SMTP_FROM: no-reply@team-ops.invalid
       SMTP_FROM_NAME: チーム運営
       # Local-only dummy signing key, shared with env/api.env (NOTIFY_RELAY_SECRET)
-      ALLOW_LOCAL_SIGNING_KEY: "true" # the dummy key below is public; refused without this
+      ALLOW_LOCAL_SIGNING_KEY: "true" # the dummy keys below are public; refused without this
       RELAY_SIGNING_KEYS: "local:bG9jYWwtZGV2LXJlbGF5LXNpZ25pbmcta2V5LTAwMDE="
+      # Local-only dummy key for the email_ref kept in logs instead of addresses (ADR-0003)
+      EMAIL_REF_KEY: "bG9jYWwtZGV2LXJlbGF5LWVtYWlsLXJlZi1rZXktMDAx"
       DB_DSN: "notify_relay:notify_relay@tcp(mysql:3306)/notify_relay?parseTime=true"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-lgtm:4318"
     ports:
