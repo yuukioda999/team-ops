@@ -41,8 +41,9 @@ test('AC-002-01 AC-002-05 AC-002-06 AC-002-11 AC-002-12 AC-001-19 from an invita
     await representativeWithTeam(representative, repEmail, teamName)
     await representative.getByRole('link', { name: 'メンバーを招待する' }).click()
     await representative.getByRole('button', { name: '招待リンクを発行する' }).click()
-    const urlText = representative.locator('.invite__url')
-    await expect(urlText).toHaveText(/\/join\?token=[0-9a-f]{64}$/)
+    // 利用者に見える文言で探す(招待リンクの URL そのもの)
+    const urlText = representative.getByText(/\/join\?token=[0-9a-f]{64}$/)
+    await expect(urlText).toBeVisible()
     inviteUrl = (await urlText.textContent()) ?? ''
     await expect(representative.getByRole('img', { name: '招待リンクのQRコード' })).toBeVisible()
   })
@@ -103,7 +104,7 @@ test('AC-002-03 AC-002-07 a revoked link cannot be used', async ({ browser }) =>
   await representativeWithTeam(representative, unique('rep'), teamName)
   await representative.getByRole('link', { name: 'メンバーを招待する' }).click()
   await representative.getByRole('button', { name: '招待リンクを発行する' }).click()
-  const inviteUrl = (await representative.locator('.invite__url').textContent()) ?? ''
+  const inviteUrl = (await representative.getByText(/\/join\?token=[0-9a-f]{64}$/).textContent()) ?? ''
   await representative.getByRole('button', { name: 'リンクを無効にする' }).click()
   await expect(representative.getByRole('heading', { name: '有効な招待リンクはありません' })).toBeVisible()
 
