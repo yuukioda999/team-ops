@@ -7,9 +7,29 @@
 > **現在の状況:開発中(2026年11月)。001 アカウントとチーム作成(メールのリンクでログイン、表示名、チームの作成と切り替え)まで完成。`make up` で動かせる**
 > 要件定義・設計判断(ADR)・受け入れ基準付きの機能仕様を作成済みです。第1弾は2027年1月にデモ環境として公開予定です。
 
+## 画面(001 アカウントとチーム作成)
+
+| ログイン | リンクの確認 | チームの用意 | チームのホーム |
+|---|---|---|---|
+| <img src="https://raw.githubusercontent.com/yuukioda999/team-ops-web/main/docs/screenshots/001/01-login.png" width="180" alt="メールアドレスを入力するログイン画面"> | <img src="https://raw.githubusercontent.com/yuukioda999/team-ops-web/main/docs/screenshots/001/03-verify.png" width="180" alt="ボタンを押してログインする確認画面"> | <img src="https://raw.githubusercontent.com/yuukioda999/team-ops-web/main/docs/screenshots/001/05-start.png" width="180" alt="チームを作成するか招待から参加するかを選ぶ画面"> | <img src="https://raw.githubusercontent.com/yuukioda999/team-ops-web/main/docs/screenshots/001/08-team-home.png" width="180" alt="チーム名と役割が表示されたチームのホーム"> |
+
+ほかの画面は [team-ops-web/docs/screenshots/001](https://github.com/yuukioda999/team-ops-web/tree/main/docs/screenshots/001) にあります。
+
+## 見どころ(どこを見れば何が分かるか)
+
+| 見てほしい点 | 場所 |
+|---|---|
+| 要件から仕様への落とし込み | [立ち上げ依頼](docs/requirements/project-brief.md) → [001 の仕様(受け入れ基準)](specs/001-account-and-team/spec.md) → [計画と判断 D1〜D8](specs/001-account-and-team/plan.md) → [作業分解](specs/001-account-and-team/tasks.md) |
+| 設計判断の記録 | [ADR 一覧](docs/adr/)。例:[Goへの配信の切り出し](docs/adr/0002-extract-delivery-to-go.md)、[個人情報を持たない設計](docs/adr/0003-minimize-personal-data.md)、[マジックリンク](docs/adr/0008-magic-link-login.md) |
+| AIの使い方と人間の判断 | [ai-log](docs/ai-log/2026-11-06-001-account-and-team.md)、[最終レビューの指摘と判断](specs/001-account-and-team/review-t30.md)。AIのレビューの指摘と、人間が決めたことを分けて記録しています |
+| 受け入れ基準とテストの対応 | テスト名に受け入れ基準のIDを入れています。例:[API の Feature テスト](https://github.com/yuukioda999/team-ops-api/tree/main/tests/Feature/Auth)、[他チームのデータは404](https://github.com/yuukioda999/team-ops-api/blob/main/tests/Tenancy/TeamIsolationTest.php) |
+| 全サービスを通したテスト | [E2E(Playwright)](e2e/tests/001-account-and-team.spec.ts)。CI の [smoke](.github/workflows/smoke.yml) が、docker compose の環境に対して毎回動かします |
+| Laravel の作り | Controller → UseCase → Model の層分け、[ログインのUseCase](https://github.com/yuukioda999/team-ops-api/tree/main/app/UseCases/Auth)、[アウトボックスと配信の依頼](https://github.com/yuukioda999/team-ops-api/tree/main/app/Support/NotifyRelay) |
+| Go の作り | [notify-relay](https://github.com/yuukioda999/notify-relay):domain・usecase・adapter・infra の層分け、[重複防止と再送、デッドロック時のやり直し](https://github.com/yuukioda999/notify-relay/blob/main/internal/infra/mysqlstore/store.go) |
+
 ## このプロジェクトの特徴
 
-- **要件定義から運用保守まで、全工程の成果物を公開**:要件、設計判断、受け入れ基準付きの仕様、テスト、負荷試験、障害訓練の振り返りまでを残します
+- **要件定義から運用保守まで、全工程の成果物を公開**:要件、設計判断、受け入れ基準付きの仕様、テストを公開しています。負荷試験と障害訓練の振り返りは、今後追加します
 - **仕様駆動のAI駆動開発**:仕様 → 計画 → 作業分解 → 実装の順にAI(Claude Code)と進め、AIへの指示と人間が直した内容を記録します
 - **個人情報を「持たない」設計**:住所・生年月日・写真などは項目自体を持たず、持つ情報は暗号化・監査ログ・期限付き削除で扱います
 - **ローカルで本番相当を再現**:障害注入(SMTPエラー、配信サービスの停止)や負荷試験も、ローカルだけで実行できます
