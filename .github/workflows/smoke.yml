@@ -14,18 +14,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: team-ops
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: yuukioda999/team-ops-api
           path: team-ops-api
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: yuukioda999/team-ops-web
           path: team-ops-web
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: yuukioda999/notify-relay
           path: notify-relay
@@ -52,7 +52,7 @@ jobs:
           check http://localhost:8025/api/v1/info
           check http://localhost:5173/
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
