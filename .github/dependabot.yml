@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # The smoke workflow's actions are tested together
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /e2e
+    schedule:
+      interval: weekly
+    ignore:
+      # Follows the Node major used in CI (24); raise it by hand together with the other repos
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
