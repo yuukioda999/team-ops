@@ -4,7 +4,7 @@ plan.md をもとにした作業の一覧。上から順に進める。各タス
 
 凡例:`[api]` team-ops-api、`[web]` team-ops-web、`[ops]` team-ops
 
-**進み具合(2026-11-07):T01〜T20 完了。T21(PR と CI)は、team-ops-api と team-ops-web をマージして CI が通ったら完了にする。T22(ai-log)はマージの前に書く。**
+**進み具合(2026-11-07):T01〜T22 完了。**
 
 ## 1. 土台
 
