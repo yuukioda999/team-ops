@@ -52,7 +52,9 @@ make up      # 全サービスを起動
 
 ### ログインしてみる
 
-ローカルは実在のアドレスにメールを送りません(`RECIPIENTS_INVALID_ONLY=true`。宛先は `.invalid` で終わるアドレスだけ)。それ以外のアドレスを入れると、入力欄にエラーを表示します。画面とサービスのポート(Mailpit・MySQL を含む)は、このPCからだけ開けます。
+ローカルは実在のアドレスにメールを送りません(`RECIPIENTS_INVALID_ONLY=true`。宛先は `.invalid` で終わるアドレスだけ)。それ以外のアドレスを入れると、入力欄にエラーを表示します。
+
+`.invalid` は、実在しないことが決まっている予約済みのドメインです(RFC 2606)。インターネットでは届かないので、`coach@example.invalid`、`parent1@test.invalid` のように名前は自由に付けられます。メールはすべて Mailpit に届きます。画面とサービスのポート(Mailpit・MySQL を含む)は、このPCからだけ開けます。
 
 1. http://localhost:5173 を開き、`coach@example.invalid` のようなアドレスを入力して「ログイン用のリンクを送る」を押す
 2. http://localhost:8025(Mailpit)で届いたメールを開き、リンクを押す
