@@ -4,6 +4,8 @@ plan.md をもとにした作業の一覧。上から順に進める。各タス
 
 凡例:`[api]` team-ops-api、`[relay]` notify-relay、`[web]` team-ops-web、`[ops]` team-ops
 
+**進み具合(2026-11-06):T01〜T31 完了。T32 は後の作業。** T30 の最終レビューで残った要判断の項目は [review-t30.md](review-t30.md) にある。
+
 ## 1. 土台
 
 | No. | 作業 | 対象 | 受け入れ基準 |
