@@ -35,9 +35,10 @@ services:
   otel-lgtm:
     image: grafana/otel-lgtm:latest
     ports:
-      - "3000:3000"   # Grafana
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
+      # This machine only, like every port below (the local keys are public)
+      - "127.0.0.1:3000:3000"   # Grafana
+      - "127.0.0.1:4317:4317"   # OTLP gRPC
+      - "127.0.0.1:4318:4318"   # OTLP HTTP
 
   api:
     build:
@@ -48,7 +49,7 @@ services:
     env_file:
       - ./env/api.env
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       mysql:
         condition: service_healthy
@@ -95,8 +96,8 @@ services:
       context: ../notify-relay
     environment:
       PORT: "8080"
-      # Recipients outside .invalid are refused (the relay calls this demo mode; same as RECIPIENTS_INVALID_ONLY on the API)
-      DEMO_MODE: "true"
+      # Recipients outside .invalid are refused (same setting as on the API)
+      RECIPIENTS_INVALID_ONLY: "true"
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
       SMTP_TLS: none # Mailpit only; real mail services use starttls or tls
@@ -110,7 +111,7 @@ services:
       DB_DSN: "notify_relay:notify_relay@tcp(mysql:3306)/notify_relay?parseTime=true"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-lgtm:4318"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
     depends_on:
       mysql:
@@ -128,7 +129,7 @@ services:
     environment:
       API_PROXY_TARGET: "http://api:8000"
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     depends_on:
       api:
         condition: service_healthy
