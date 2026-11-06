@@ -24,7 +24,7 @@ up: ## Start every service (API, worker, relay, web, MySQL, Mailpit, Grafana)
 	@echo "  Mailpit  http://localhost:8025   (received mail)"
 	@echo "  Grafana  http://localhost:3000   (traces, metrics, logs)"
 	@echo ""
-	@echo "  Log in: enter any address ending in .invalid (demo mode), then open the link in Mailpit"
+	@echo "  Log in: enter any address ending in .invalid (RECIPIENTS_INVALID_ONLY), then open the link in Mailpit"
 
 down: ## Stop every service
 	$(COMPOSE) down
