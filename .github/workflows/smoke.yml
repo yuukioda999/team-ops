@@ -65,7 +65,7 @@ jobs:
           npm run typecheck
           npx playwright install --with-deps chromium
 
-      - name: End-to-end tests (001, 002)
+      - name: End-to-end tests (001, 002, 003)
         working-directory: team-ops/e2e
         run: npx playwright test
 
