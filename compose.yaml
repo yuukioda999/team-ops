@@ -109,6 +109,8 @@ services:
       # Local-only dummy key for the email_ref kept in logs instead of addresses (ADR-0003)
       EMAIL_REF_KEY: "bG9jYWwtZGV2LXJlbGF5LWVtYWlsLXJlZi1rZXktMDAx"
       DB_DSN: "notify_relay:notify_relay@tcp(mysql:3306)/notify_relay?parseTime=true"
+      # Results go back to the API by webhook, signed with the key above (ADR-0019)
+      WEBHOOK_URL: "http://api:8000/api/internal/notify-relay/events"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-lgtm:4318"
     ports:
       - "127.0.0.1:8080:8080"
