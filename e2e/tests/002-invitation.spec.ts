@@ -1,33 +1,11 @@
-import { expect, test, type Browser, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import { newPage, representativeWithTeam, unique } from './flows.ts'
 import { waitForLink, waitForSubject } from './mailpit.ts'
 
 /**
  * 002 招待と参加承認を、全サービスを起動した環境でブラウザから通しで確かめる(T20)。
  * 代表と保護者を、別々のブラウザ(Cookie を分けたコンテキスト)で動かす。
  */
-
-const unique = (who: string) => `e2e-${who}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.invalid`
-
-async function newPage(browser: Browser): Promise<Page> {
-  const context = await browser.newContext()
-  return context.newPage()
-}
-
-/** 代表としてログインし、表示名を登録してチームを作る */
-async function representativeWithTeam(page: Page, email: string, teamName: string): Promise<void> {
-  await page.goto('/login')
-  await page.getByLabel('メールアドレス').fill(email)
-  await page.getByRole('button', { name: 'ログイン用のリンクを送る' }).click()
-  const { url } = await waitForLink(email, '/login/verify')
-  await page.goto(new URL(url).pathname + new URL(url).search)
-  await page.getByRole('button', { name: 'ログインする' }).click()
-  await page.getByLabel('表示名').fill('E2E 代表')
-  await page.getByRole('button', { name: '登録する' }).click()
-  await page.getByRole('link', { name: 'チームを作成する' }).click()
-  await page.getByLabel('チーム名').fill(teamName)
-  await page.getByRole('button', { name: 'チームを作成する' }).click()
-  await expect(page.getByRole('heading', { name: teamName, level: 1 })).toBeVisible()
-}
 
 test('AC-002-01 AC-002-05 AC-002-06 AC-002-11 AC-002-12 AC-001-19 from an invitation link to a new member', async ({ browser }) => {
   const teamName = `E2E 招待FC ${Date.now() % 100000}`
