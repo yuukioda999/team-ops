@@ -43,3 +43,16 @@ export async function waitForSubject(to: string, subject: string): Promise<void>
     )
     .toBe(true)
 }
+
+/** The subjects of every mail Mailpit has received for the address (newest first). */
+export async function subjectsTo(to: string): Promise<string[]> {
+  const search = await fetch(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:"${to}"`)}`)
+  const { messages } = (await search.json()) as { messages: Summary[] }
+  return messages.map((m) => m.Subject)
+}
+
+/** Every mail Mailpit has received for the address (newest first). */
+export async function mailsTo(to: string): Promise<Summary[]> {
+  const search = await fetch(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:"${to}"`)}`)
+  return ((await search.json()) as { messages: Summary[] }).messages
+}
