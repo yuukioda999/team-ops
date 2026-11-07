@@ -102,7 +102,7 @@ spec に記録の基準はない。ADR-0012 はチームの重要な操作を記
 
 - notices:id、team_id、author_user_id、title(暗号化)、body(暗号化)、target_type(all / grades / roles)、target_values(学年または役割の一覧)、status(scheduled / published / cancelled)、scheduled_at、published_at、recipient_count
 - notice_recipients:notice_id、user_id(一意)。006 で既読・配信状況の列を足す
-- アウトボックスの重複防止キー:`notice:{お知らせID}:part:{分割番号}`(spec の補足)。宛先はユーザーIDの順に並べて1,000人ずつに分ける
+- アウトボックスの重複防止キー:`team:{チームID}:notice:{お知らせID}:part:{分割番号}`(spec の補足に、アウトボックスの規約のチームIDを付けた)。宛先はユーザーIDの順に並べて1,000人ずつに分ける
 
 ## API
 
