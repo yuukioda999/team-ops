@@ -27,8 +27,10 @@
 - 重複の判定では、比べる前に前後の空白を除き、全角・半角と大文字・小文字をそろえる(NFKC で正規化して小文字にする)
 - TeamPolicy に、選手の管理(代表・役員)、全員の名簿の閲覧(代表・役員・コーチ)を足す。保護者は自分に紐づく選手だけを、UseCase の問い合わせで絞り込んで返す
 - 保護者が自分に紐づかない選手を ID で取得すると、存在しない場合と同じ404にする(AC-003-10)
-- 監査ログの action は player.viewed_list・player.viewed・player.created・player.updated・player.deleted・player.guardians_changed・player.imported
+- 監査ログの action は player.viewed_list・player.viewed・player.created・player.updated・player.deleted・player.guardians_changed・player.import_checked・player.imported
+- CSV の確認(player.import_checked)も記録する。確認は既存の名簿と照らした結果(重複の警告)を返すので、記録しないと、名前を並べた CSV で「この子が名簿にいるか」を記録なしに探れてしまうため
 - details には範囲(all / own)、絞り込みの条件(学年・背番号)、変わった項目の名前、件数だけを入れる。表示名は入れない
+- 絞り込みの条件(学年・背番号)は ADR-0012 の「名簿の項目を入れない」の例外とする。閲覧の記録では「どの範囲を見たか」が要で、条件がないと何を見たかが分からないため。条件は名前ではなく、条件だけでは個人を特定できない
 
 ## 結果
 
