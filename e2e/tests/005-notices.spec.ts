@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { issueInvitation, joinAsParent, newPage, representativeWithTeam, unique } from './flows.ts'
-import { subjectsTo, waitForSubject } from './mailpit.ts'
+import { mailsTo, subjectsTo, waitForSubject } from './mailpit.ts'
 
 /**
  * 005 お知らせを、全サービスを起動した環境でブラウザから通しで確かめる(T16)。
@@ -56,6 +56,14 @@ test('AC-005-01 AC-005-02 AC-005-03 AC-005-05 AC-005-09 AC-005-10 AC-005-14 AC-0
     await waitForSubject(repEmail, subject)
     expect((await subjectsTo(grade3Email)).filter((s) => s === subject)).toHaveLength(1)
     expect(await subjectsTo(grade5Email)).not.toContain(subject)
+
+    // 送信者本人にも1通だけ。送信元はログインのメールと同じ共通のアドレス(ADR-0018)
+    const repMails = await mailsTo(repEmail)
+    const noticeMails = repMails.filter((m) => m.Subject === subject)
+    expect(noticeMails).toHaveLength(1)
+    const loginMail = repMails.find((m) => m.Subject !== subject)
+    expect(loginMail).toBeDefined()
+    expect(noticeMails[0].From).toEqual(loginMail!.From)
   })
 
   await test.step('AC-005-14 AC-005-16 the grade 3 parent reads it in the app with the link; the grade 5 parent does not see it', async () => {
