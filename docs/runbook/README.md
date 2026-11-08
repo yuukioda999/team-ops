@@ -8,6 +8,7 @@
 | [deploy.md](deploy.md) | 新しい版を出すとき、前の版に戻すとき |
 | [backup.md](backup.md) | 毎日のバックアップの設定と、戻し方 |
 | [monitoring.md](monitoring.md) | Grafana Cloud への送信、死活監視、アラート |
+| [certificates.md](certificates.md) | HTTPS の証明書(期限の確かめ方、気をつけること) |
 | [troubleshooting.md](troubleshooting.md) | デモが開けない、メモリが足りないなど |
 
 ## 構成
@@ -35,4 +36,5 @@ flowchart LR
 ## 決まりごと
 
 - サーバーで直接ファイルを書き換えたら、同じ変更をリポジトリにも入れる(サーバーだけの変更を残さない)。例外は `.env` 系の3ファイルだけ
+- Caddy・MySQL・Mailpit・Alloy などのイメージの版は `compose.prod.yaml` で固定している。上げるときはリポジトリの変更(Dependabot の PR など)として行う
 - 作業の前後で `docker compose -f compose.prod.yaml ps` を見て、すべて `running`(api は `healthy`)であることを確かめる

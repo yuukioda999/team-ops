@@ -26,6 +26,9 @@
 				request>headers>Cookie delete
 				request>headers>Authorization delete
 				request>headers>Referer delete
+				request>headers>X-Xsrf-Token delete
+				# The session cookie set on login is as good as the login itself
+				resp_headers>Set-Cookie delete
 			}
 		}
 	}

@@ -15,14 +15,18 @@ ADR-0022 のとおり、Grafana Cloud の無料枠を使います。サーバー
 2. My Account → スタックの **Loki** の「Details」で、URL と User を控える。URL は `https://logs-prod-XXX.grafana.net` で、末尾に `/loki/api/v1/push` を付けて `GRAFANA_LOKI_URL` にします
 3. 同じく **Prometheus** の「Details」で、Remote Write の URL と User を控える(`GRAFANA_PROM_URL`、`GRAFANA_PROM_USER`)
 4. Access Policies で、`logs:write` と `metrics:write` だけを持つトークンを作る(`GRAFANA_CLOUD_TOKEN`)。トークンは作ったときにしか表示されません
-5. サーバーの `/opt/team-ops/deploy/.env` に5つを書き、`COMPOSE_PROFILES=monitoring` にして `./deploy.sh` を実行する
+5. サーバーの `/opt/team-ops/deploy/.env` に5つを書き、`COMPOSE_PROFILES=monitoring` にして `./deploy.sh` を実行する。Alloy と、Alloy が Docker を読むための窓口(docker-api)が起動します
 
 確かめる:
 
 - Grafana の Explore → Logs で `{env="demo"}` を選ぶと、`service` ごとのログが見える
 - Explore → Metrics で `node_memory_MemAvailable_bytes{instance="demo"}` が出る
 
-ログの送信の前に、Alloy がメールアドレスとトークンらしい文字列を伏せ字にします(`deploy/config.alloy`)。アプリはもともと個人情報をログに出しません(ADR-0003)。これは二重の歯止めです。
+ログの送信の前に、Alloy がメールアドレスとトークンらしい文字列を伏せ字にします(`deploy/config.alloy`)。アプリはもともと個人情報をログに出しません(ADR-0003)。これは二重の歯止めです。Caddy のログからは、Cookie・ログイン後のセッションの Cookie・token を消してあります。
+
+訪問者の IP アドレスとブラウザの情報(User-Agent)は、アクセスログとして Grafana Cloud に送ります(大量にデモを作る相手を止めるのに使うため。ADR-0022)。Grafana Cloud の無料枠では、ログは14日で消えます。
+
+Alloy は root ではないユーザーで、権限を持たずに動きます。Docker のソケットには直接さわらず、コンテナの一覧とログを読むことだけを許した窓口(docker-api)を通します。
 
 ## 2. 死活監視
 

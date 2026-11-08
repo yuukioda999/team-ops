@@ -3,3 +3,4 @@
 .env.api
 .env.relay
 deploys.log
+.config-hashes

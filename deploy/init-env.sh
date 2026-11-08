@@ -28,18 +28,19 @@ DOMAIN=${domain}
 # Let's Encrypt sends notices about the certificate here
 ACME_EMAIL=info@freie.jp
 
-# Image tags (commit hashes). deploy.sh changes them; see docs/runbook/deploy.md
-API_TAG=latest
-WEB_TAG=latest
-RELAY_TAG=latest
+# Image tags (commit hashes, 40 characters). Set by deploy.sh: ./deploy.sh api=<hash> web=<hash> relay=<hash>
+API_TAG=
+WEB_TAG=
+RELAY_TAG=
 
 MYSQL_ROOT_PASSWORD=$(hex)
 TEAM_OPS_DB_PASSWORD=${team_ops_db}
 RELAY_DB_PASSWORD=${relay_db}
 
 # Grafana Cloud (docs/runbook/monitoring.md). Fill in from the stack's "Details" page.
-# The monitoring profile starts Alloy, which sends logs and the server's resources there
-COMPOSE_PROFILES=monitoring
+# Set to monitoring once the values below are filled in; it starts Alloy, which sends logs and the
+# server's resources there. Empty means no monitoring
+COMPOSE_PROFILES=
 GRAFANA_LOKI_URL=https://logs-prod-XXX.grafana.net/loki/api/v1/push
 GRAFANA_LOKI_USER=000000
 GRAFANA_PROM_URL=https://prometheus-prod-XX-prod-XX.grafana.net/api/prom/push
@@ -73,8 +74,8 @@ SESSION_LIFETIME=43200
 SESSION_ENCRYPT=true
 SESSION_SECURE_COOKIE=true
 SANCTUM_STATEFUL_DOMAINS=${domain}
-# The web container (nginx) in front of the API, on Docker's private range
-TRUSTED_PROXIES=172.16.0.0/12
+# The web container (nginx) in front of the API, at its fixed address (compose.prod.yaml)
+TRUSTED_PROXIES=172.30.0.10
 
 BLIND_INDEX_KEY=base64:$(b64)
 
@@ -102,4 +103,5 @@ EOF
 
 chmod 600 .env .env.api .env.relay
 echo "Created .env, .env.api and .env.relay for ${domain}."
-echo "Next: fill in ACME_EMAIL and the Grafana Cloud values in .env, then run ./deploy.sh"
+echo "Next: check ACME_EMAIL in .env, then run ./deploy.sh api=<hash> web=<hash> relay=<hash>"
+echo "Monitoring (Grafana Cloud) can be added later: docs/runbook/monitoring.md"

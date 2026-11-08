@@ -33,11 +33,12 @@
 ```sh
 # パッケージを最新にし、セキュリティ更新を自動で入れる
 sudo apt update && sudo apt -y upgrade
-sudo apt -y install unattended-upgrades
+sudo apt -y install unattended-upgrades git
 sudo dpkg-reconfigure -plow unattended-upgrades   # 「はい」を選ぶ
 
-# 時刻を日本時間に(ログの読みやすさのため。アプリは UTC で動く)
+# 時刻を日本時間に(ログの読みやすさのため。アプリは UTC で動く)。cron は再起動するまで古い時刻帯のまま
 sudo timedatectl set-timezone Asia/Tokyo
+sudo systemctl restart cron
 
 # メモリが足りなくなったときに MySQL が強制終了されないよう、2GB のスワップを作る
 sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
@@ -49,7 +50,8 @@ echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-swappiness.conf && sudo sysc
 SSH はパスワードでのログインと root でのログインを止めます。**別のターミナルでログインしたまま**行い、設定後に新しく接続できることを確かめてから閉じてください。
 
 ```sh
-sudo tee /etc/ssh/sshd_config.d/99-team-ops.conf <<'EOF'
+# sshd は同じ項目なら先に読んだ値を使う。cloud-init の 50-cloud-init.conf より先に読まれるよう 00- にする
+sudo tee /etc/ssh/sshd_config.d/00-team-ops.conf <<'EOF'
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no
@@ -71,6 +73,7 @@ sudo ufw enable
 確かめる:
 
 - 新しいターミナルで `ssh -i ~/.ssh/team-ops-demo ubuntu@<IPv4>` が通る
+- `sudo sshd -T | grep -Ei '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin) '` の3つがすべて `no`
 - `ssh -o PubkeyAuthentication=no ubuntu@<IPv4>` が `Permission denied` になる
 - `sudo ufw status` に 22・80・443 だけが出る
 - `free -h` の Swap が 2.0Gi
@@ -87,7 +90,19 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
 sudo apt update
 sudo apt -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 sudo usermod -aG docker ubuntu   # 一度ログアウトして入り直すと sudo なしで使える
+
+# 自動更新の対象に Docker も入れ、カーネルの更新のために必要なら深夜に自動で再起動する
+sudo tee /etc/apt/apt.conf.d/52unattended-upgrades-local <<'EOF'
+Unattended-Upgrade::Origins-Pattern { "origin=Docker"; };
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "04:45";
+EOF
 ```
+
+コンテナは `restart: unless-stopped` なので、再起動のあとは自動で起動します。
+
+確かめる:`sudo unattended-upgrade --dry-run --debug 2>&1 | grep -i 'origin=Docker'` に Docker が出る
+
 
 注意:Docker が公開したポートは ufw を通りません。そのため `compose.prod.yaml` では、外に出すのを Caddy(ホストのネットワーク)だけにし、web は `127.0.0.1` にだけ公開しています。ほかのポートを `ports:` に足さないでください。
 
@@ -115,14 +130,11 @@ cd /opt/team-ops/deploy
 
 `init-env.sh` が、新しい乱数の鍵とパスワードを入れた `.env`・`.env.api`・`.env.relay` を作ります(権限は 600)。
 
-続けて `.env` を開き、次を直します。
-
-- `ACME_EMAIL`:証明書の期限切れなどの連絡を受けるアドレス
-- `GRAFANA_*`:[monitoring.md](monitoring.md) の手順1で控えた値。まだ用意していなければ、`COMPOSE_PROFILES=` と空にしておけば Alloy なしで起動できます
+続けて `.env` を開き、`ACME_EMAIL`(証明書の期限切れなどの連絡を受けるアドレス。初期値は info@freie.jp)を確かめます。監視(Grafana Cloud)は公開のあとに [monitoring.md](monitoring.md) で足します。それまでは `COMPOSE_PROFILES=` が空のままで、監視なしで動きます。
 
 `.env` 系の3ファイルは、パスワードマネージャーなどサーバーの外にも控えておきます。`APP_KEY` と `BLIND_INDEX_KEY` をなくすと、バックアップから戻しても暗号化した項目を読めません。
 
-確かめる:`docker compose -f compose.prod.yaml config --quiet` が何も出さずに終わる
+確かめる:`ls -l .env .env.api .env.relay` の権限が3つとも `-rw-------`
 
 ## 6. 公開する
 
@@ -131,7 +143,7 @@ cd /opt/team-ops/deploy
 ./deploy.sh api=<API のハッシュ> web=<Web のハッシュ> relay=<relay のハッシュ>
 ```
 
-ハッシュは各リポジトリの main の最新のコミット(40文字)です。初回は `latest` のままでもかまいません。その場合は `./deploy.sh` だけで動きます。
+ハッシュは各リポジトリの main の最新のコミット(40文字)で、そのコミットの CI が成功している必要があります。初回から必ずハッシュを指定します(`latest` は受け付けません。前の版に戻せなくなるため)。
 
 `deploy.sh` は次を順に行い、最後に `https://demo.freie.jp/api/health` が答えるのを確かめます。
 

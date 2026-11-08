@@ -57,5 +57,6 @@ sudo du -sh /var/backups/team-ops /var/lib/docker
 ## サーバーを作り直す
 
 1. [setup.md](setup.md) の1〜5を行う。手順5では `init-env.sh` を使わず、控えておいた `.env`・`.env.api`・`.env.relay` を置く
-2. `./deploy.sh` を実行する
-3. 残したいデータがあれば [backup.md](backup.md) の手順で戻す(デモのデータなので、通常は不要です)
+2. `./deploy.sh` を実行する(タグは `.env` に入っている)
+3. setup.md の7(毎日のバックアップの cron と、監視)を行う
+4. 残したいデータがあれば [backup.md](backup.md) の手順で戻す(デモのデータなので、通常は不要です)

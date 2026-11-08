@@ -32,17 +32,20 @@
 - サーバー:さくらのVPS 2GB、Ubuntu 24.04 LTS。まず月払いで始める
 - 公開する URL:`https://demo.freie.jp`。外から受けるのは 80・443(Caddy)と SSH だけ
 - 構成(1台の Docker Compose、`deploy/compose.prod.yaml`)
-  - Caddy:HTTPS を終端し、画面の nginx に転送する。利用者の本当の IPv4・IPv6 アドレスを受け取るため、ホストのネットワークで動かす。画面の nginx は Caddy の X-Forwarded-For だけを信頼する(IP ごとの回数制限のため)。`/api/internal/` は外からは 404
+  - Caddy:HTTPS を終端し、画面の nginx に転送する。利用者の本当の IPv4・IPv6 アドレスを受け取るため、ホストのネットワークで動かす。画面の nginx は Caddy の X-Forwarded-For だけを、API は画面の nginx の X-Forwarded-For だけを信頼する(IP ごとの回数制限のため)。そのため Compose のネットワークのアドレスを固定する(172.30.0.0/24。Caddy はゲートウェイ 172.30.0.1 から、nginx は 172.30.0.10 から届く)。`/api/internal/` は外からは 404
   - web:画面のイメージ(nginx)。画面を配り、`/api` を API に転送する
   - api:FrankenPHP のイメージ(T35)。キューの処理と定期処理も同じイメージで別のコンテナとして動かす
-  - notify-relay、MySQL(2GB に合わせてバッファを小さくする)、Mailpit(25時間で消す)、Grafana Alloy
+  - notify-relay、MySQL(2GB に合わせてバッファを小さくする。root はコンテナの中からだけ)、Mailpit(25時間で消す)、Grafana Alloy
+  - Grafana Alloy は root ではないユーザーで、権限を持たずに動かす。Docker のソケットには直接さわらず、コンテナの一覧とログを読むことだけを許した窓口(docker-socket-proxy)を通す
+  - アプリ以外のイメージ(Caddy・MySQL・Mailpit・Alloy・docker-socket-proxy)は版を固定し、Dependabot の PR で上げる
   - メモリが足りなくなったときの備えに、2GB のスワップを作る
   - Mailpit の画面と SMTP、MySQL は外に出さない
 - デモモードを有効にする(`DEMO_MODE=true`)。外部にメールは送らない
 - 秘密情報(アプリの鍵、DB のパスワード、notify-relay の署名鍵など)はサーバー上の `.env` だけに置き、Git には入れない
 - イメージは main にマージされたときに GitHub Actions で作り、GHCR に置く。タグはコミットのハッシュ
 - 秘密情報の3ファイルは `deploy/init-env.sh` が乱数で作る
-- デプロイは、サーバーで `deploy/deploy.sh` を実行する。イメージを取ってきて、マイグレーションを流し、コンテナを入れ替える。`--rollback` で前のタグに戻せる
+- ログ:訪問者の IP アドレスとブラウザの情報(User-Agent)はアクセスログとして Grafana Cloud に送る。大量にデモを作る相手を止めるのに使うため、伏せ字にしない。無料枠ではログは14日で消える。Cookie・セッションの Cookie・token はログから消し、メールアドレスらしい文字列は送る前に伏せ字にする
+- デプロイは、サーバーで `deploy/deploy.sh` を実行する。イメージを取ってきて、マイグレーションを流し、コンテナを入れ替える。`--rollback` で前のタグに戻せる。サーバーではコミットのハッシュだけを受け付ける。途中で失敗したら前のタグに戻して起動し直す
 - 同じ構成を CI(`deploy-check.yml`)で毎回起動し、外から HTTPS で E2E とバックアップからの戻しを確かめる
 - 手順書(docs/runbook/)に、初期設定・デプロイ・戻し方・バックアップと戻し方・証明書・監視を書く
 
