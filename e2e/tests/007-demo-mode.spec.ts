@@ -21,6 +21,8 @@ test('AC-007-01 AC-007-02 AC-007-04 AC-007-05 AC-007-11 AC-007-12 a visitor logs
     const started = Date.now()
     await page.getByRole('button', { name: 'デモとしてログイン' }).click()
     await expect(page.getByRole('heading', { name: 'みどり台FC U-10(デモ)' })).toBeVisible()
+    // 3秒以内(AC-007-02)は API の Feature テストで確かめる。ここは画面の表示まで含み、CI のサーバーの
+    // 速さが揺れて時々落ちないよう、余裕を持たせて10秒にする
     expect(Date.now() - started).toBeLessThan(10_000)
     await expect(page.getByRole('complementary', { name: 'デモ環境' })).toContainText('デモ環境です。入力したデータは24時間後に削除されます')
   })

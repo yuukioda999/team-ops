@@ -25,6 +25,8 @@ services:
     image: axllent/mailpit:latest
     environment:
       MP_ENABLE_CHAOS: "true"
+      # 受け取ってから25時間で自動で消す。デモチームの削除の消し残しの歯止め(ADR-0021、AC-007-07)
+      MP_MAX_AGE: 25h
       MP_SMTP_AUTH_ACCEPT_ANY: "true"
       MP_SMTP_AUTH_ALLOW_INSECURE: "true"
     ports:
