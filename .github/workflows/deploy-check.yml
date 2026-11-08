@@ -1,0 +1,116 @@
+name: Demo server setup check
+
+# Starts deploy/compose.prod.yaml the way the demo server does (ADR-0022), with images built here
+# from each repository's main, and checks it from outside through Caddy (HTTPS on localhost):
+# the demo works end to end, internal parts are not reachable, and a backup can be restored.
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/**', 'e2e/**', '.github/workflows/deploy-check.yml']
+  pull_request:
+    paths: ['deploy/**', 'e2e/**', '.github/workflows/deploy-check.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: team-ops
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/team-ops-api
+          path: team-ops-api
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/team-ops-web
+          path: team-ops-web
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/notify-relay
+          path: notify-relay
+
+      - name: Build the three images under the names the server pulls
+        run: |
+          docker build --target prod -t ghcr.io/yuukioda999/team-ops-api:latest team-ops-api
+          docker build --target prod -t ghcr.io/yuukioda999/team-ops-web:latest team-ops-web
+          docker build -t ghcr.io/yuukioda999/notify-relay:latest notify-relay
+
+      - name: Make the settings with init-env.sh
+        working-directory: team-ops/deploy
+        run: |
+          ./init-env.sh localhost
+          # Nothing is sent to Grafana Cloud from CI: leave Alloy (the monitoring profile) off
+          sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=/' .env
+          ls -l .env .env.api .env.relay | awk '{ print $1 }' | sort -u | grep -qx -- '-rw-------'
+
+      - name: Deploy with deploy.sh
+        working-directory: team-ops/deploy
+        run: |
+          docker compose -f compose.prod.yaml config --quiet
+          DEPLOY_SKIP_PULL=1 ./deploy.sh
+          docker stats --no-stream --format '{{.Name}} {{.MemUsage}}'
+
+      - name: Only Caddy is reachable from outside
+        run: |
+          # HTTP goes to HTTPS
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost/login)" = "308"
+          curl -kfsS https://localhost/api/health
+          curl -kfsS https://localhost/login | grep -q '<div id="root">'
+          # The relay's webhook is for the inside only
+          test "$(curl -ks -o /dev/null -w '%{http_code}' -X POST https://localhost/api/internal/notify-relay/events)" = "404"
+          # MySQL, Mailpit, the API and the relay are not published on the host
+          for port in 3306 8025 1025 8000 8080; do
+            if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$port/"; then echo "port $port is open"; exit 1; fi
+          done
+          # The web container is published on loopback only
+          ss -ltn | grep ':8088 ' | grep -q '127.0.0.1:8088'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: team-ops/e2e/package-lock.json
+
+      - name: The demo works end to end (spec 007)
+        working-directory: team-ops/e2e
+        env:
+          WEB_URL: https://localhost
+          E2E_IGNORE_HTTPS_ERRORS: '1'
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test tests/007-demo-mode.spec.ts
+
+      - name: Back up and restore (docs/runbook/backup.md)
+        working-directory: team-ops/deploy
+        run: |
+          export BACKUP_DIR=$RUNNER_TEMP/backups
+          ./backup.sh
+          ls -l "$BACKUP_DIR"
+          teams() { docker compose -f compose.prod.yaml exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N -e "select count(*) from team_ops.teams"' 2>/dev/null; }
+          before=$(teams)
+          test "$before" -gt 0
+          echo yes | ./restore.sh "$(ls "$BACKUP_DIR"/*-team_ops.sql.gz | tail -1)"
+          test "$(teams)" = "$before"
+          curl -kfsS https://localhost/api/health
+
+      - name: Logs
+        if: always()
+        working-directory: team-ops/deploy
+        run: docker compose -f compose.prod.yaml logs --no-color --tail=100
+
+      - name: Keep the screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deploy-check-results
+          path: |
+            team-ops/e2e/test-results
+            team-ops/e2e/playwright-report
+          retention-days: 14

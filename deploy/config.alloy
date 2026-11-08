@@ -1,0 +1,92 @@
+// Grafana Alloy on the demo server (ADR-0022): container logs to Grafana Cloud Logs (Loki), and
+// the server's CPU, memory, disk and network to Grafana Cloud Metrics (Prometheus).
+// The URLs, users and token come from .env.
+
+// ---- Logs of every container of this Compose project ----
+discovery.docker "containers" {
+	host = "unix:///var/run/docker.sock"
+
+	filter {
+		name   = "label"
+		values = ["com.docker.compose.project=team-ops-demo"]
+	}
+}
+
+discovery.relabel "containers" {
+	targets = discovery.docker.containers.targets
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service"
+	}
+}
+
+loki.source.docker "containers" {
+	host          = "unix:///var/run/docker.sock"
+	targets       = discovery.relabel.containers.output
+	relabel_rules = discovery.relabel.containers.rules
+	forward_to    = [loki.process.redact.receiver]
+}
+
+// The apps do not log personal data (ADR-0003). As a second guard, mask anything that looks like
+// an email address or a token before it leaves the server
+loki.process "redact" {
+	stage.replace {
+		expression = "([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})"
+		replace    = "[email]"
+	}
+
+	stage.replace {
+		expression = "token=([0-9a-f]{16,})"
+		replace    = "[token]"
+	}
+
+	stage.static_labels {
+		values = {env = "demo"}
+	}
+	forward_to = [loki.write.grafana_cloud.receiver]
+}
+
+loki.write "grafana_cloud" {
+	endpoint {
+		url = sys.env("GRAFANA_LOKI_URL")
+
+		basic_auth {
+			username = sys.env("GRAFANA_LOKI_USER")
+			password = sys.env("GRAFANA_CLOUD_TOKEN")
+		}
+	}
+}
+
+// ---- The server's resources ----
+prometheus.exporter.unix "host" {
+	procfs_path    = "/host/proc"
+	sysfs_path     = "/host/sys"
+	rootfs_path    = "/host/root"
+	set_collectors = ["cpu", "meminfo", "filesystem", "loadavg", "netdev", "diskstats", "uname"]
+}
+
+prometheus.scrape "host" {
+	targets         = prometheus.exporter.unix.host.targets
+	scrape_interval = "60s"
+	forward_to      = [prometheus.relabel.instance.receiver]
+}
+
+prometheus.relabel "instance" {
+	rule {
+		target_label = "instance"
+		replacement  = "demo"
+	}
+	forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+prometheus.remote_write "grafana_cloud" {
+	endpoint {
+		url = sys.env("GRAFANA_PROM_URL")
+
+		basic_auth {
+			username = sys.env("GRAFANA_PROM_USER")
+			password = sys.env("GRAFANA_CLOUD_TOKEN")
+		}
+	}
+}

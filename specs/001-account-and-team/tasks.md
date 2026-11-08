@@ -79,7 +79,7 @@ plan.md をもとにした作業の一覧。上から順に進める。各タス
 |---|---|---|---|---|
 | T33 | notify-relay の毎日の削除処理(受付から7日で、依頼・配信記録・重複防止キーを消す) | 005 の前 | relay | AC-R001-22。005 の T02 で行う(ADR-0018 で1時間ごとに決定) |
 | T34 | TeamPolicy を作り、チームの操作の権限判定をすべて Policy に集める | 004 の最初 | api | review-t30.md の E |
-| T35 | 本番用のイメージを php-fpm と nginx、または FrankenPHP にする(`php artisan serve` をやめる) | デモサーバーを決めるとき | api | review-t30.md の I |
+| T35 | 本番用のイメージを php-fpm と nginx、または FrankenPHP にする(`php artisan serve` をやめる)。**FrankenPHP に決定(ADR-0022)** | デモサーバーを決めるとき | api | review-t30.md の I |
 
 ## レビューで止まるところ
 

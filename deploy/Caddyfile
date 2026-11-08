@@ -1,0 +1,33 @@
+# Caddy in front of the demo (ADR-0022). Gets and renews the Let's Encrypt certificate by itself.
+{
+	email {$ACME_EMAIL}
+	admin off
+}
+
+{$DOMAIN} {
+	# The notify-relay webhook is for the inside of the server only (it is also signed, ADR-0019)
+	@internal path /api/internal/*
+	respond @internal 404
+
+	# Caddy replaces any X-Forwarded-For sent by the client with the client's real address.
+	# The web container trusts only Caddy for it (REAL_IP_FROM), and the API trusts only the web container
+	reverse_proxy 127.0.0.1:8088
+
+	encode zstd gzip
+	log {
+		output stdout
+		# Path only: mail links carry a one-time token in the query string (as in the web container)
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					delete token
+				}
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+				request>headers>Referer delete
+			}
+		}
+	}
+}
+

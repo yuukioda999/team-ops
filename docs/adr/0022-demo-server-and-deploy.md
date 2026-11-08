@@ -25,22 +25,25 @@
 | イメージの作り方 | **GitHub Actions で作り、GHCR に置く** | サーバーの上でビルドする(メモリが足りず、時間もかかる) |
 | デプロイ | **最初はサーバー上の `deploy.sh` を人が実行する** | GitHub Actions が SSH で入って自動で更新する(サーバーに入れる鍵を GitHub に預けることになる。慣れたら見直す) |
 | バックアップ | **毎日 DB を書き出し、サーバー上に7日分残す。戻す手順を手順書に書き、一度実際に戻して確かめる** | 外部のストレージにも置く(デモのデータは24時間で消える架空のものなので、今は費用に見合わない) |
-| 監視 | **Grafana Cloud の無料枠にトレースとログを送る(今の OpenTelemetry をそのまま使う)。外から5分ごとにトップ画面を確かめる** | サーバーの中に Grafana を置く(メモリを使い、サーバーが落ちると監視も落ちる) |
+| 監視 | **Grafana Cloud の無料枠に、コンテナのログとサーバーの CPU・メモリ・ディスクを Grafana Alloy で送る。外から5分ごとに `/api/health` を確かめる。トレースは、API と relay に OpenTelemetry を入れる作業(T32)のときに足す** | サーバーの中に Grafana を置く(メモリを使い、サーバーが落ちると監視も落ちる) |
 
 ## 決定
 
 - サーバー:さくらのVPS 2GB、Ubuntu 24.04 LTS。まず月払いで始める
 - 公開する URL:`https://demo.freie.jp`。外から受けるのは 80・443(Caddy)と SSH だけ
-- 構成(1台の Docker Compose、`compose.prod.yaml`)
-  - Caddy:HTTPS を終端し、画面の nginx に転送する
+- 構成(1台の Docker Compose、`deploy/compose.prod.yaml`)
+  - Caddy:HTTPS を終端し、画面の nginx に転送する。利用者の本当の IPv4・IPv6 アドレスを受け取るため、ホストのネットワークで動かす。画面の nginx は Caddy の X-Forwarded-For だけを信頼する(IP ごとの回数制限のため)。`/api/internal/` は外からは 404
   - web:画面のイメージ(nginx)。画面を配り、`/api` を API に転送する
   - api:FrankenPHP のイメージ(T35)。キューの処理と定期処理も同じイメージで別のコンテナとして動かす
-  - notify-relay、MySQL、Mailpit
+  - notify-relay、MySQL(2GB に合わせてバッファを小さくする)、Mailpit(25時間で消す)、Grafana Alloy
+  - メモリが足りなくなったときの備えに、2GB のスワップを作る
   - Mailpit の画面と SMTP、MySQL は外に出さない
 - デモモードを有効にする(`DEMO_MODE=true`)。外部にメールは送らない
 - 秘密情報(アプリの鍵、DB のパスワード、notify-relay の署名鍵など)はサーバー上の `.env` だけに置き、Git には入れない
 - イメージは main にマージされたときに GitHub Actions で作り、GHCR に置く。タグはコミットのハッシュ
-- デプロイは、サーバーで `deploy.sh <タグ>` を実行する。イメージを取ってきて、マイグレーションを流し、コンテナを入れ替える。前のタグを指定すれば戻せる
+- 秘密情報の3ファイルは `deploy/init-env.sh` が乱数で作る
+- デプロイは、サーバーで `deploy/deploy.sh` を実行する。イメージを取ってきて、マイグレーションを流し、コンテナを入れ替える。`--rollback` で前のタグに戻せる
+- 同じ構成を CI(`deploy-check.yml`)で毎回起動し、外から HTTPS で E2E とバックアップからの戻しを確かめる
 - 手順書(docs/runbook/)に、初期設定・デプロイ・戻し方・バックアップと戻し方・証明書・監視を書く
 
 ## 結果
