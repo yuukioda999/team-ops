@@ -97,7 +97,10 @@ jobs:
           docker compose -f compose.prod.yaml logs --no-log-prefix web | tail -1 | grep -qE '^(127\.0\.0\.1|::1) '
           ! docker compose -f compose.prod.yaml logs web | grep -q '203.0.113.5'
           # Logs written by scheduled commands reach the scheduler's container log
-          docker compose -f compose.prod.yaml exec -T api-scheduler php artisan tinker --execute="Log::info('scheduler log check');"
+          # (the API writes its stderr log to schedule:work's own stderr, which the app user can write to)
+          docker compose -f compose.prod.yaml exec -T api-scheduler php artisan config:show logging.channels.stderr.handler_with | tee /dev/stderr | grep -q '/proc/1/fd/2'
+          docker compose -f compose.prod.yaml exec -T api-scheduler sh -c 'echo scheduler log check > /proc/1/fd/2'
+          sleep 1
           docker compose -f compose.prod.yaml logs api-scheduler | grep -q 'scheduler log check'
           # Alloy runs as a non-root user and lists the containers through the proxy
           test "$(docker compose -f compose.prod.yaml exec -T alloy id -u)" = 473
