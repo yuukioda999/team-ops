@@ -93,7 +93,8 @@ jobs:
           curl -kfsS -o /dev/null -H 'X-Forwarded-For: 203.0.113.5' https://localhost/login
           sleep 1
           docker compose -f compose.prod.yaml logs --no-log-prefix web | tail -5
-          docker compose -f compose.prod.yaml logs --no-log-prefix web | tail -1 | grep -q '^127.0.0.1 '
+          # The runner's own address (IPv4 or IPv6 loopback), not the forged one nor the Docker gateway
+          docker compose -f compose.prod.yaml logs --no-log-prefix web | tail -1 | grep -qE '^(127\.0\.0\.1|::1) '
           ! docker compose -f compose.prod.yaml logs web | grep -q '203.0.113.5'
           # Logs written by scheduled commands reach the scheduler's container log
           docker compose -f compose.prod.yaml exec -T api-scheduler php artisan tinker --execute="Log::info('scheduler log check');"
