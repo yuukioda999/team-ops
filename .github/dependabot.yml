@@ -16,3 +16,9 @@ updates:
       # Follows the Node major used in CI (24); raise it by hand together with the other repos
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+  # The images pinned in the demo server's Compose file (ADR-0022). Each update goes through the
+  # deploy check (.github/workflows/deploy-check.yml) before it is merged
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: weekly

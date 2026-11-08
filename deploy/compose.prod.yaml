@@ -1,0 +1,216 @@
+# The public demo environment on one VPS (ADR-0022). Not for local development: use ../compose.yaml.
+# Run from this directory on the server, with the settings in .env (copy .env.example).
+#   ./deploy.sh            pull the images in .env and start or update everything
+#
+# Only Caddy is reachable from outside (80/443). Everything else listens inside the Compose network,
+# except the web container, which Caddy reaches on 127.0.0.1.
+
+name: team-ops-demo
+
+x-api: &api
+  image: ghcr.io/yuukioda999/team-ops-api:${API_TAG:?set API_TAG in .env}
+  env_file: [.env.api]
+  restart: unless-stopped
+  logging: &logging
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  # HTTPS with Let's Encrypt, in front of everything. Host networking so it sees the client's real
+  # IPv4 and IPv6 address (Docker's port publishing would replace IPv6 clients with its own address)
+  caddy:
+    image: caddy:2.10.2
+    network_mode: host
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    logging: *logging
+    depends_on: [web]
+
+  # The screens, and /api forwarded to the API (same origin, so the session cookie works)
+  web:
+    image: ghcr.io/yuukioda999/team-ops-web:${WEB_TAG:?set WEB_TAG in .env}
+    environment:
+      API_UPSTREAM: http://api:8000
+      # Caddy reaches this container through the published port, so it arrives from the network's
+      # gateway. Trust X-Forwarded-For from there only (not from the other containers)
+      REAL_IP_FROM: 172.30.0.1/32
+    networks:
+      default:
+        # Fixed, because the API trusts X-Forwarded-For from this address only (TRUSTED_PROXIES)
+        ipv4_address: 172.30.0.10
+    ports:
+      - "127.0.0.1:8088:8080"
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      api:
+        condition: service_healthy
+
+  api:
+    <<: *api
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8000/api/health') === false ? 1 : 0);"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  api-worker:
+    <<: *api
+    command: ["php", "artisan", "queue:work", "--tries=3", "--max-time=3600"]
+    # Lets the job in progress finish (its HTTP call to notify-relay times out in 10 seconds)
+    stop_grace_period: 30s
+    # The image's own health check asks FrankenPHP's web server, which only the api container runs
+    healthcheck:
+      disable: true
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # outbox:redispatch every minute, demo:prune every hour and the other scheduled commands
+  api-scheduler:
+    <<: *api
+    command: ["php", "artisan", "schedule:work"]
+    environment:
+      # schedule:work runs each command with its output thrown away; the commands write their logs
+      # to schedule:work's own stderr so they reach the container log (and the alerts in monitoring.md)
+      LOG_STDERR_STREAM: /proc/1/fd/2
+    healthcheck:
+      disable: true
+    depends_on:
+      api:
+        condition: service_healthy
+
+  notify-relay:
+    image: ghcr.io/yuukioda999/notify-relay:${RELAY_TAG:?set RELAY_TAG in .env}
+    env_file: [.env.relay]
+    environment:
+      PORT: "8080"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_TLS: none # Mailpit inside the network; no mail leaves the server (ADR-0021)
+      WEBHOOK_URL: http://api:8000/api/internal/notify-relay/events
+    # Sending in progress gets up to 30 seconds after SIGTERM (AC-R001-14)
+    stop_grace_period: 35s
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+
+  mysql:
+    image: mysql:8.4.11
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      # root only from inside this container (backup.sh and restore.sh use it there)
+      MYSQL_ROOT_HOST: localhost
+      TEAM_OPS_DB_PASSWORD: ${TEAM_OPS_DB_PASSWORD:?set TEAM_OPS_DB_PASSWORD in .env}
+      RELAY_DB_PASSWORD: ${RELAY_DB_PASSWORD:?set RELAY_DB_PASSWORD in .env}
+    command:
+      # Fits the 2GB server (ADR-0022): the default buffer pool and connection count are for larger machines
+      - --innodb-buffer-pool-size=256M
+      - --max-connections=50
+      - --performance-schema=OFF
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # ping answers once the server takes TCP connections, even without a password (no secret in the
+      # process list). During the first initialisation the server does not listen on TCP yet
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+    logging: *logging
+
+  # Catches every mail of the demo; the "送信されたメール" screen reads it through the API (ADR-0021).
+  # Its web page and SMTP are never published
+  mailpit:
+    image: axllent/mailpit:v1.33.1
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+      # Mail older than 25 hours is deleted, a backstop for the demo deletion (ADR-0021)
+      MP_MAX_AGE: 25h
+      MP_DATABASE: /data/mailpit.db
+    volumes:
+      - mailpit-data:/data
+    restart: unless-stopped
+    logging: *logging
+
+  # Sends the containers' logs and the server's CPU, memory and disk to Grafana Cloud (ADR-0022)
+  # Started only with the "monitoring" profile (COMPOSE_PROFILES in .env), so the CI check runs without it
+  alloy:
+    image: grafana/alloy:v1.11.3
+    profiles: [monitoring]
+    command: ["run", "--storage.path=/var/lib/alloy/data", "--disable-reporting", "/etc/alloy/config.alloy"]
+    # Not root, no capabilities: it can read the host's resource figures but not root-only files
+    # such as the .env files or the backups. The image's alloy user owns its data directory
+    user: "473:473"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
+    environment:
+      GRAFANA_LOKI_URL: ${GRAFANA_LOKI_URL:-}
+      GRAFANA_LOKI_USER: ${GRAFANA_LOKI_USER:-}
+      GRAFANA_PROM_URL: ${GRAFANA_PROM_URL:-}
+      GRAFANA_PROM_USER: ${GRAFANA_PROM_USER:-}
+      GRAFANA_CLOUD_TOKEN: ${GRAFANA_CLOUD_TOKEN:-}
+    volumes:
+      - ./config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+      # The host's /proc and / for CPU, memory and disk usage
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+    networks: [default, docker-api]
+    depends_on: [docker-api]
+    restart: unless-stopped
+    logging: *logging
+
+  # Alloy reads the container list and logs through this proxy instead of the Docker socket itself:
+  # only reading containers is allowed, so it cannot start, change or exec into containers
+  docker-api:
+    image: tecnativa/docker-socket-proxy:v0.4.1
+    profiles: [monitoring]
+    environment:
+      CONTAINERS: 1
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [docker-api]
+    read_only: true
+    tmpfs: [/run, /tmp]
+    restart: unless-stopped
+    logging: *logging
+
+networks:
+  default:
+    ipam:
+      config:
+        # Fixed so that the trusted addresses (REAL_IP_FROM, TRUSTED_PROXIES) do not change
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1
+  # Only Alloy and the proxy; the apps cannot reach the Docker API
+  docker-api:
+    internal: true
+
+volumes:
+  caddy-data:
+  caddy-config:
+  mysql-data:
+  mailpit-data:
+  alloy-data:

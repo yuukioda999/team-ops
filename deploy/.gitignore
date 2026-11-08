@@ -1,0 +1,6 @@
+# Settings with secrets, made on the server by init-env.sh (ADR-0022)
+.env
+.env.api
+.env.relay
+deploys.log
+.config-hashes

@@ -1,0 +1,164 @@
+name: Demo server setup check
+
+# Starts deploy/compose.prod.yaml the way the demo server does (ADR-0022), with images built here
+# from each repository's main, and checks it from outside through Caddy (HTTPS on localhost):
+# the demo works end to end, internal parts are not reachable, and a backup can be restored.
+# It also runs every day, because the other three repositories' changes do not trigger it.
+on:
+  schedule:
+    - cron: '17 19 * * *' # 04:17 in Japan
+  push:
+    branches: [main]
+    paths: ['deploy/**', 'e2e/**', '.github/workflows/deploy-check.yml']
+  pull_request:
+    paths: ['deploy/**', 'e2e/**', '.github/workflows/deploy-check.yml']
+  workflow_dispatch:
+    # To check changes in the other repositories before they are merged (default: main)
+    inputs:
+      api_ref: { description: team-ops-api branch, default: main }
+      web_ref: { description: team-ops-web branch, default: main }
+      relay_ref: { description: notify-relay branch, default: main }
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: team-ops
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/team-ops-api
+          ref: ${{ inputs.api_ref || 'main' }}
+          path: team-ops-api
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/team-ops-web
+          ref: ${{ inputs.web_ref || 'main' }}
+          path: team-ops-web
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/notify-relay
+          ref: ${{ inputs.relay_ref || 'main' }}
+          path: notify-relay
+
+      - name: Build the three images under the names the server pulls
+        run: |
+          docker build --target prod -t ghcr.io/yuukioda999/team-ops-api:latest team-ops-api
+          docker build --target prod -t ghcr.io/yuukioda999/team-ops-web:latest team-ops-web
+          docker build -t ghcr.io/yuukioda999/notify-relay:latest notify-relay
+
+      - name: Make the settings with init-env.sh
+        working-directory: team-ops/deploy
+        run: |
+          ./init-env.sh localhost
+          # Every one of the three files is readable by its owner only
+          for f in .env .env.api .env.relay; do test "$(stat -c %a "$f")" = 600; done
+          # Alloy runs too, with Grafana Cloud addresses that go nowhere: this checks that it starts
+          # as a non-root user and reads the containers through the proxy, without sending anything
+          sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=monitoring/' .env
+          sed -i 's#^GRAFANA_LOKI_URL=.*#GRAFANA_LOKI_URL=http://127.0.0.1:9/loki/api/v1/push#; s#^GRAFANA_PROM_URL=.*#GRAFANA_PROM_URL=http://127.0.0.1:9/api/prom/push#' .env
+
+      - name: Deploy with deploy.sh
+        working-directory: team-ops/deploy
+        run: |
+          # On the server only commit hashes are accepted
+          ! ./deploy.sh
+          DEPLOY_SKIP_PULL=1 ./deploy.sh api=latest web=latest relay=latest
+          docker stats --no-stream --format '{{.Name}} {{.MemUsage}}'
+
+      - name: Only Caddy is reachable from outside
+        run: |
+          # HTTP goes to HTTPS
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost/login)" = "308"
+          curl -kfsS https://localhost/api/health
+          curl -kfsS https://localhost/login | grep -q '<div id="root">'
+          # The relay's webhook is for the inside only
+          test "$(curl -ks -o /dev/null -w '%{http_code}' -X POST https://localhost/api/internal/notify-relay/events)" = "404"
+          # MySQL, Mailpit, the API and the relay are not published on the host
+          for port in 3306 8025 1025 8000 8080; do
+            if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$port/"; then echo "port $port is open"; exit 1; fi
+          done
+          # The web container is published on loopback only
+          ss -ltn | grep ':8088 ' | grep -q '127.0.0.1:8088'
+
+      - name: The client IP comes from Caddy only, and secrets stay out of the logs
+        working-directory: team-ops/deploy
+        run: |
+          # Caddy replaces a forged X-Forwarded-For; the web container trusts only Caddy (via the gateway)
+          curl -kfsS -o /dev/null -H 'X-Forwarded-For: 203.0.113.5' https://localhost/login
+          sleep 1
+          docker compose -f compose.prod.yaml logs --no-log-prefix web | tail -5
+          # The runner's own address (IPv4 or IPv6 loopback), not the forged one nor the Docker gateway
+          docker compose -f compose.prod.yaml logs --no-log-prefix web | tail -1 | grep -qE '^(127\.0\.0\.1|::1) '
+          ! docker compose -f compose.prod.yaml logs web | grep -q '203.0.113.5'
+          # Logs written by scheduled commands reach the scheduler's container log
+          # (the API writes its stderr log to schedule:work's own stderr, which the app user can write to)
+          docker compose -f compose.prod.yaml exec -T api-scheduler php artisan config:show logging.channels.stderr.handler_with | tee /dev/stderr | grep -q '/proc/1/fd/2'
+          docker compose -f compose.prod.yaml exec -T api-scheduler sh -c 'echo scheduler log check > /proc/1/fd/2'
+          sleep 1
+          docker compose -f compose.prod.yaml logs api-scheduler | grep -q 'scheduler log check'
+          # Alloy runs as a non-root user and lists the containers through the proxy
+          test "$(docker compose -f compose.prod.yaml exec -T alloy id -u)" = 473
+          sleep 20
+          docker compose -f compose.prod.yaml logs alloy | tail -20
+          ! docker compose -f compose.prod.yaml logs alloy | grep -iE 'permission denied|error while listing containers'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: team-ops/e2e/package-lock.json
+
+      - name: The demo works end to end (spec 007)
+        working-directory: team-ops/e2e
+        env:
+          WEB_URL: https://localhost
+          E2E_IGNORE_HTTPS_ERRORS: '1'
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test tests/007-demo-mode.spec.ts
+
+      - name: The session cookie of the logins above is not in Caddy's log
+        working-directory: team-ops/deploy
+        run: |
+          docker compose -f compose.prod.yaml logs caddy | grep -q '"uri":"/api/demo/sessions"'
+          ! docker compose -f compose.prod.yaml logs caddy | grep -iE 'set-cookie|_session=|xsrf-token'
+
+      - name: Back up and restore (docs/runbook/backup.md)
+        working-directory: team-ops/deploy
+        run: |
+          export BACKUP_DIR=$RUNNER_TEMP/backups
+          teams() { docker compose -f compose.prod.yaml exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N -e "select count(*) from team_ops.teams"' 2>/dev/null; }
+          before=$(teams)
+          test "$before" -gt 0
+          ./backup.sh
+          ls -l "$BACKUP_DIR"
+          # Change the data after the backup, so that the restore has something to undo
+          docker compose -f compose.prod.yaml exec -T api php artisan demo:prune --all
+          test "$(teams)" = 0
+          echo yes | ./restore.sh "$(ls "$BACKUP_DIR"/*-team_ops.sql.gz | tail -1)"
+          test "$(teams)" = "$before"
+          curl -kfsS https://localhost/api/health
+
+      - name: Logs
+        if: always()
+        working-directory: team-ops/deploy
+        # The tags are given here too: a failed first deploy leaves them empty in .env
+        env: { API_TAG: latest, WEB_TAG: latest, RELAY_TAG: latest }
+        run: docker compose -f compose.prod.yaml logs --no-color --tail=100
+
+      - name: Keep the screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deploy-check-results
+          path: |
+            team-ops/e2e/test-results
+            team-ops/e2e/playwright-report
+          retention-days: 14

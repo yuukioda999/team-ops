@@ -13,6 +13,8 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: process.env.WEB_URL ?? 'http://localhost:5173',
+    // The CI check of the demo server setup uses Caddy's own certificate for localhost (deploy-check.yml)
+    ignoreHTTPSErrors: process.env.E2E_IGNORE_HTTPS_ERRORS === '1',
     ...devices['Pixel 7'],
     locale: 'ja-JP',
     screenshot: 'on',
