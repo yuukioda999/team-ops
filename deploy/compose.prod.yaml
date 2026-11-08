@@ -69,6 +69,9 @@ services:
     command: ["php", "artisan", "queue:work", "--tries=3", "--max-time=3600"]
     # Lets the job in progress finish (its HTTP call to notify-relay times out in 10 seconds)
     stop_grace_period: 30s
+    # The image's own health check asks FrankenPHP's web server, which only the api container runs
+    healthcheck:
+      disable: true
     depends_on:
       api:
         condition: service_healthy
@@ -81,6 +84,8 @@ services:
       # schedule:work runs each command with its output thrown away; the commands write their logs
       # to schedule:work's own stderr so they reach the container log (and the alerts in monitoring.md)
       LOG_STDERR_STREAM: /proc/1/fd/2
+    healthcheck:
+      disable: true
     depends_on:
       api:
         condition: service_healthy

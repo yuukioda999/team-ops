@@ -145,6 +145,8 @@ jobs:
       - name: Logs
         if: always()
         working-directory: team-ops/deploy
+        # The tags are given here too: a failed first deploy leaves them empty in .env
+        env: { API_TAG: latest, WEB_TAG: latest, RELAY_TAG: latest }
         run: docker compose -f compose.prod.yaml logs --no-color --tail=100
 
       - name: Keep the screenshots and traces
