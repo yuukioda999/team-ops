@@ -65,9 +65,24 @@ jobs:
           npm run typecheck
           npx playwright install --with-deps chromium
 
-      - name: End-to-end tests (001〜005)
+      - name: End-to-end tests (001〜006, demo mode off)
         working-directory: team-ops/e2e
         run: npx playwright test
+
+      - name: Turn demo mode on (spec 007)
+        working-directory: team-ops
+        run: |
+          sed -i 's/^DEMO_MODE=false/DEMO_MODE=true/' env/api.env
+          docker compose up -d --force-recreate api api-worker api-scheduler
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/api/demo > /dev/null; then echo "demo mode on"; exit 0; fi
+            sleep 5
+          done
+          echo "demo mode did not come up"; exit 1
+
+      - name: End-to-end tests (007, demo mode on)
+        working-directory: team-ops/e2e
+        run: npx playwright test tests/007-demo-mode.spec.ts
 
       - name: Keep the screenshots and traces
         if: always()
