@@ -56,8 +56,8 @@ test-relay:
 e2e: ## Run the end-to-end tests against the running environment
 	cd e2e && npm ci && npx playwright install chromium && npx playwright test
 
-demo-reset: ## Delete all demo teams and rebuild the template team (same as the nightly job)
-	$(COMPOSE) exec api php artisan demo:reset
+demo-reset: ## Delete every demo team (same deletion as the hourly job; needs DEMO_MODE=true to log in again)
+	$(COMPOSE) exec api php artisan demo:prune --all
 
 chaos-smtp: ## Make Mailpit reject 30% of mail with a temporary SMTP error (retry drill)
 	curl -fsS -X PUT http://localhost:8025/api/v1/chaos \
