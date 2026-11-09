@@ -4,7 +4,7 @@
 
 Laravel・React・Go の4つのリポジトリで作り、**要件定義から公開・運用の準備まで、AI(Claude Code)と仕様駆動で進めた記録**をすべて公開しています。
 
-> **現在の状況(2026年11月):第1弾の機能 001〜007 が完成。** 本番と同じ構成を CI で毎日起動して確かめており、いつでも公開できます(公開先は応募の時期に合わせて用意します)。負荷試験と障害訓練の振り返りは、次に追加します。
+> **現在の状況(2026年11月):第1弾の機能 001〜007 が完成。** 本番と同じ構成を CI で毎日起動して確かめています。公開の準備は、画面のイメージを GitHub のコンテナ置き場(GHCR)に登録する作業を残すだけです(公開先は応募の時期に合わせて用意します)。負荷試験と障害訓練の振り返りは、次に追加します。
 
 ## 30秒で分かること
 
@@ -12,13 +12,13 @@ Laravel・React・Go の4つのリポジトリで作り、**要件定義から�
 |---|---|
 | **何を作ったか** | チームの作成と招待、名簿(CSV の一括登録)、役割と権限、お知らせ(予約送信)、既読と配信状況、未読の人への再通知、誰でも試せるデモモード |
 | **どう作ったか** | 機能ごとに 受け入れ基準 → 計画(選択肢と推奨)→ 人間が判断 → ADR → 実装 → AI のレビュー → 人間が指摘ごとに判断、の順。[ADR 22本](docs/adr/)、[機能仕様 7本](specs/)、[AI 活用の記録 8本](docs/ai-log/) |
-| **品質** | API の Feature テスト 531件(SQLite と MariaDB の両方)、画面のテスト 180件、Go のテスト、全サービスを通した E2E。テスト名に受け入れ基準の ID を入れて対応を追えるようにしています |
+| **品質** | API のテスト 531件(SQLite と、CI の MySQL 8.4 の両方で実行)、画面のテスト 180件、Go のテスト(テーブル駆動、`-race` で並行処理も検証)、全サービスを通した E2E。テスト名に受け入れ基準の ID を入れて対応を追えるようにしています |
 | **設計の芯** | 個人情報を「持たない」設計(ADR-0003)、他チームのデータは必ず 404(マルチテナント)、メール配信を Go に切り出して二重配信と取りこぼしを防ぐ(ADR-0002・0019) |
 | **公開の準備** | FrankenPHP・Caddy・Docker Compose の本番構成、手順書、毎日の構成チェック(HTTPS で E2E、外に出ているのは Caddy だけ、バックアップから戻せる) |
 
 ## 画面
 
-誰でもログインなしで試せる「デモモード」(spec 007)の画面です。役割を切り替えると、代表・コーチ・保護者それぞれの見え方を確かめられます。
+登録なしで、ボタン1つでログインして試せる「デモモード」(spec 007)の画面です。役割を切り替えると、代表・コーチ・保護者それぞれの見え方を確かめられます。
 
 | デモのログイン | チームのホーム(デモの帯) | 送信されたメール |
 |---|---|---|
@@ -35,7 +35,7 @@ Laravel・React・Go の4つのリポジトリで作り、**要件定義から�
 AI が実装・テスト・セルフレビューを行い、人間が判断とマージを行います([CLAUDE.md](CLAUDE.md))。
 
 ```mermaid
-flowchart LR
+flowchart TD
   spec[spec.md<br>受け入れ基準] --> plan[plan.md<br>選択肢と推奨]
   plan --> human1{人間が判断}
   human1 --> adr[ADR]
@@ -47,9 +47,9 @@ flowchart LR
   pr --> log[ai-log<br>AI の間違いと学び]
 ```
 
-- **判断は人間**:AI は選択肢と推奨を示すところで止まります。たとえば 007 では、計画の判断6件とレビューの指摘21件を、人間が1つずつ決めています([007 の ai-log](docs/ai-log/2026-11-08-007-demo-mode.md))
+- **判断は人間**:AI は選択肢と推奨を示すところで止まります。たとえば 007 では、計画の判断6件とレビューの指摘21件について、AI が番号ごとに推奨を示し、人間が全件の扱いを決めました(レビューは17件を直し、4件は直さない。直す途中で決定どおりにできないと分かった1件は、改めて人間が判断)([007 の ai-log](docs/ai-log/2026-11-08-007-demo-mode.md))
 - **AI の間違いを記録する**:どの ai-log にも「AI が間違えた点と学び」があります。例:メールの削除を「1回でうまくいく前提」で書いていた、ADR に検索できない列を条件として書いていた、ログの伏せ字でリクエストの側しか見ていなかった
-- **AI の指示を超えた判断も人間**:公開の準備では、AI は VPS の契約を前提に案内していました。人間が「VPS は必須か」と問い直したことで、先に README と試験を進める判断になりました([公開の準備の ai-log](docs/ai-log/2026-11-08-deploy-preparation.md))
+- **前提を問い直すのも人間**:公開の準備では、AI は VPS の契約を前提に案内していました。人間が「VPS は必須か」と問い、AI が比較を示し、人間が「README・負荷試験・障害訓練を先に進める」を選びました([公開の準備の ai-log](docs/ai-log/2026-11-08-001-T35-deploy-preparation.md))
 
 ## 見どころ(どこを見れば何が分かるか)
 
@@ -60,7 +60,7 @@ flowchart LR
 | AI の使い方と人間の判断 | [ai-log](docs/ai-log/)。各 PR にも「AI レビューの指摘」と「人間の判断」を分けて記録しています |
 | 受け入れ基準とテストの対応 | テスト名に受け入れ基準の ID を入れています。例:[デモモードのテスト](https://github.com/yuukioda999/team-ops-api/tree/main/tests/Feature/Demo)、[他チームのデータは 404](https://github.com/yuukioda999/team-ops-api/blob/main/tests/Tenancy/TeamIsolationTest.php) |
 | 全サービスを通したテスト | [E2E(Playwright)](e2e/tests/)。CI の [smoke](.github/workflows/smoke.yml) が docker compose の環境に対して毎回動かします |
-| Laravel の作り | Controller → UseCase → Model の層分け、Policy による権限、[アウトボックスと配信の依頼](https://github.com/yuukioda999/team-ops-api/tree/main/app/Support/NotifyRelay)、[配信結果の webhook の受け取りと照合](https://github.com/yuukioda999/team-ops-api/tree/main/app/UseCases/Notices) |
+| Laravel の作り | Controller → UseCase → Model の層分け、Policy による権限、[アウトボックスと配信の依頼](https://github.com/yuukioda999/team-ops-api/tree/main/app/Support/NotifyRelay)、[配信結果の webhook の受け取りと照合](https://github.com/yuukioda999/team-ops-api/tree/main/app/UseCases/Deliveries) |
 | Go の作り | [notify-relay](https://github.com/yuukioda999/notify-relay):domain・usecase・adapter・infra の層分け、同時に送る数の上限、再送、[重複防止とデッドロック時のやり直し](https://github.com/yuukioda999/notify-relay/blob/main/internal/infra/mysqlstore/store.go)、結果の webhook のまとめ送り |
 | 公開と運用の準備 | [本番の構成](deploy/)、[手順書](docs/runbook/)、[毎日の構成チェック](.github/workflows/deploy-check.yml) |
 
@@ -111,9 +111,11 @@ make up      # 全サービスを起動(初回は数分かかる。make ps で a
 docker compose up -d --force-recreate api api-worker api-scheduler
 ```
 
-http://localhost:5173 を開くと「デモとしてログイン」が出ます。架空のチーム(選手20人、保護者20人など)が自動で作られ、役割を切り替えながら全機能を試せます。
+http://localhost:5173 を開くと「デモとしてログイン」が出ます。架空のチーム(選手20人、保護者20人など)が自動で作られ、役割を切り替えながら、ほぼすべての機能を試せます(メールアドレスの変更とチームの作成は、デモでは使えません)。
 
 ### メールアドレスでログインする
+
+デモモードを有効にした場合は、`env/api.env` を `DEMO_MODE=false` に戻し、同じコマンドで起動し直します(`make ps` で api が healthy になるまで待つ)。デモモードではメールでのログインを止めているためです。
 
 ローカルは実在のアドレスにメールを送りません。宛先は `.invalid` で終わるアドレスだけで、すべて Mailpit に届きます(`.invalid` は実在しないことが決まっている予約済みのドメインです)。
 
@@ -127,14 +129,16 @@ make test   # API、Web、notify-relay
 make e2e    # 起動中の環境に対して、ブラウザで全機能の流れを確かめる(Node.js が必要)
 ```
 
+`make e2e` は `DEMO_MODE=false` で動かします。デモモードの E2E は、CI と同じく `DEMO_MODE=true` にして `npx playwright test tests/007-demo-mode.spec.ts`(`e2e/` で)を実行します。
+
 障害訓練用に `make chaos-smtp`(SMTP エラーを起こす)と `make chaos-relay-down`(配信サービスを止める)があります。`make help` でコマンドの一覧を表示します。
 
 ## 公開について
 
-公開の準備はできています([ADR-0022](docs/adr/0022-demo-server-and-deploy.md))。
+公開の準備は、画面のイメージの GHCR への登録を残すだけです([ADR-0022](docs/adr/0022-demo-server-and-deploy.md))。
 
 - **構成**:VPS 1台に Docker Compose。Caddy(HTTPS)→ nginx(画面)→ FrankenPHP(API)、キューの処理、定期処理、notify-relay、MySQL、Mailpit(デモのメールを受け止める)、Grafana Alloy(監視)
-- **毎日の確認**:[deploy-check](.github/workflows/deploy-check.yml) が4つのリポジトリの main から本番と同じイメージを作り、次を確かめます
+- **毎日の確認**:[deploy-check](.github/workflows/deploy-check.yml) が、3つのリポジトリ(API・画面・relay)の main から本番と同じ名前のイメージを CI で作り、Caddy を通した HTTPS で次を確かめます
   - 外から HTTPS でデモモードの E2E が通る
   - 外に出ているのが Caddy だけ
   - ログにセッションの Cookie が出ない
