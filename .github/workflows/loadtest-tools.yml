@@ -1,0 +1,36 @@
+name: Load test tools
+
+# The sink of the load test (spec 008 AC-008-01) and the k6 scenarios
+on:
+  push:
+    branches: [main]
+    paths: ['loadtest/**', '.github/workflows/loadtest-tools.yml']
+  pull_request:
+    paths: ['loadtest/**', '.github/workflows/loadtest-tools.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  sink:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: loadtest/smtp-sink
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+  k6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: grafana/setup-k6-action@v1
+      # Parses the scenarios (syntax and options) without running them
+      - run: |
+          echo '[]' > /tmp/sessions.json
+          k6 inspect loadtest/k6/relay-direct.js > /dev/null
+          k6 inspect -e SESSIONS=/tmp/sessions.json loadtest/k6/api-during-delivery.js > /dev/null

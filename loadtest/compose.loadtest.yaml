@@ -1,0 +1,54 @@
+# The load test (spec 008, ADR-0023), on top of ../compose.yaml:
+#   docker compose -f compose.yaml -f loadtest/compose.loadtest.yaml up -d
+# The API and notify-relay run the production images (FrankenPHP, not php artisan serve), and the
+# mail goes to the sink, which throws it away. The service keeps the name mailpit because
+# notify-relay allows plain SMTP only to localhost or mailpit; the sink runs in its place.
+
+services:
+  mailpit:
+    image: team-ops-smtp-sink
+    build:
+      context: ./loadtest/smtp-sink
+    environment: !override
+      SINK_DELAY_MS: ${SINK_DELAY_MS:-50}
+    ports: !override
+      - "127.0.0.1:8025:8025" # the sink's counts (GET /stats)
+
+  api:
+    build:
+      target: prod
+    volumes: !reset []
+    environment:
+      APP_ENV: local # local settings and keys (env/api.env)
+      # loadtest:seed (spec 008) runs only with this; the production settings never set it
+      LOADTEST_SEED_ENABLED: "true"
+      APP_DEBUG: "false" # as in production
+      LOG_LEVEL: warning
+
+  api-worker:
+    build:
+      target: prod
+    volumes: !reset []
+    environment:
+      LOG_LEVEL: warning
+      APP_DEBUG: "false"
+    # FrankenPHP's own health check looks at its web server, which only the api container runs
+    healthcheck:
+      disable: true
+
+  api-scheduler:
+    build:
+      target: prod
+    volumes: !reset []
+    environment:
+      LOG_LEVEL: warning
+      APP_DEBUG: "false"
+      LOG_STDERR_STREAM: /proc/1/fd/2
+    healthcheck:
+      disable: true
+
+  # Not used by the test
+  web:
+    profiles: [unused]
+  otel-lgtm:
+    profiles: [unused]

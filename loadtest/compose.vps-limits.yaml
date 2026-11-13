@@ -1,0 +1,26 @@
+# The demo VPS's size (3 cores, 2 GB) for the reference run (spec 008 plan, decision 5).
+# Shares close to the production server's usage (ADR-0022); the totals are 3.0 CPUs and 2048 MB.
+services:
+  mysql:
+    cpus: 0.9
+    mem_limit: 640m
+    # The same settings as the production server (deploy/compose.prod.yaml)
+    command:
+      - --innodb-buffer-pool-size=256M
+      - --max-connections=50
+      - --performance-schema=OFF
+  api:
+    cpus: 0.6
+    mem_limit: 384m
+  api-worker:
+    cpus: 0.5
+    mem_limit: 320m
+  api-scheduler:
+    cpus: 0.4
+    mem_limit: 320m
+  notify-relay:
+    cpus: 0.4
+    mem_limit: 256m
+  mailpit:
+    cpus: 0.2
+    mem_limit: 128m
