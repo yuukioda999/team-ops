@@ -107,7 +107,8 @@ jobs:
           echo "EXPECTED=$expected" >> "$GITHUB_ENV"
           echo "STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
           k6 run --summary-export "$RUNNER_TEMP/result/k6-relay.json" \
-            -e REQUESTS=$(( expected / 1000 )) -e RELAY_URL=http://localhost:8080 loadtest/k6/relay-direct.js
+            -e REQUESTS=$(( expected / 1000 )) -e RELAY_URL=http://localhost:8080 loadtest/k6/relay-direct.js \
+            || echo "k6 ended with $? (a target was missed or a check failed); the run goes on and the numbers are kept" 
 
       - name: full, with the API used during the delivery (AC-008-06・07)
         if: matrix.test == 'full'
@@ -122,7 +123,8 @@ jobs:
           $COMPOSE cp api:/tmp/sessions.json "$RUNNER_TEMP/sessions.json"
           # The API without delivery, for comparison (2 minutes, before the notices go out)
           k6 run --summary-export "$RUNNER_TEMP/result/k6-api-idle.json" \
-            -e SESSIONS="$RUNNER_TEMP/sessions.json" -e API_URL=http://localhost:8000 -e DURATION=2m loadtest/k6/api-during-delivery.js
+            -e SESSIONS="$RUNNER_TEMP/sessions.json" -e API_URL=http://localhost:8000 -e DURATION=2m loadtest/k6/api-during-delivery.js \
+            || echo "k6 ended with $? (a target was missed or a check failed); the run goes on"
           now=$(date +%s); start=$(date -d "$at" +%s)
           [ "$start" -gt "$now" ] && sleep $(( start - now ))
           # The API during the delivery: from the moment the notices go out, for 12 minutes
@@ -152,6 +154,12 @@ jobs:
             --expected "$EXPECTED" --started "$STARTED" --label "$LABEL delay=${SINK_DELAY_MS}ms limits=$LIMITS" \
             | tee -a "$GITHUB_STEP_SUMMARY"
           $COMPOSE logs --no-color --tail=200 api api-worker api-scheduler notify-relay > "$RUNNER_TEMP/result/logs.txt" 2>&1
+          # The errors also go to the job log, to read them without downloading the artifact
+          echo "== Errors in the service logs (first 30)"
+          $COMPOSE logs --no-color api api-worker api-scheduler notify-relay 2>&1 | grep -iE 'level=error|"level":"error"|\.ERROR|exception|deadlock' | cut -c1-400 | head -30 || true
+          echo "== k6 summaries"
+          for f in "$RUNNER_TEMP"/result/k6-*.json; do [ -f "$f" ] && echo "$f" && python3 -c 'import json,sys;d=json.load(open(sys.argv[1]))["metrics"];[print(" ",k,{s:round(v,1) if isinstance(v,float) else v for s,v in m.items() if s in ("p(95)","p(99)","avg","rate","count","passes","fails")}) for k,m in d.items() if k.startswith(("http_req_duration","http_req_failed","checks","http_reqs"))]' "$f"; done
+          tail -5 "$RUNNER_TEMP/result/k6-api-during.txt" 2>/dev/null || true
           printf 'api_ref=%s\napi_sha=%s\nrelay_ref=%s\nrelay_sha=%s\nteam_ops_sha=%s\n' \
             "$API_REF" "$(git -C ../team-ops-api rev-parse HEAD)" "$RELAY_REF" "$(git -C ../notify-relay rev-parse HEAD)" "$(git rev-parse HEAD)" \
             > "$RUNNER_TEMP/result/versions.txt"
