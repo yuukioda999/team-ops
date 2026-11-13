@@ -28,7 +28,7 @@
 ## 決定
 
 - `loadtest/` に、受け取り役(Go)、k6 のシナリオ、試験用の compose の設定、結果を置く
-- `.github/workflows/loadtest.yml` を手で実行する。規模(チーム数)、試験の種類、受け取り役の待ち時間、CPU とメモリの制限を選べる。結果は成果物(artifact)として残し、人間の確認のあとに `loadtest/results/` へコミットする
+- `.github/workflows/loadtest.yml` を手で実行する。道具を変えた PR では、道具が壊れていないかの確認として 1,000チームの規模で自動でも動かす(手で実行する workflow は main にあるものしか動かせないため。PR の数字は結果として扱わない)。規模(チーム数)、試験の種類、受け取り役の待ち時間、CPU とメモリの制限を選べる。結果は成果物(artifact)として残し、人間の確認のあとに `loadtest/results/` へコミットする
 - API と notify-relay は本番と同じイメージで動かす(開発用の `php artisan serve` ではなく FrankenPHP)
 - API の `loadtest:seed` は、試験用のチーム・利用者・予約のお知らせを作る。宛先はすべて `.invalid` で、外には出ない
 - 目標を満たせなかったときも、数字をよく見せるために条件を変えない。数字と原因と次の手を記録する

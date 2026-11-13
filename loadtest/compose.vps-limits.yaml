@@ -4,6 +4,11 @@ services:
   mysql:
     cpus: 0.9
     mem_limit: 640m
+    # The same settings as the production server (deploy/compose.prod.yaml)
+    command:
+      - --innodb-buffer-pool-size=256M
+      - --max-connections=50
+      - --performance-schema=OFF
   api:
     cpus: 0.6
     mem_limit: 384m

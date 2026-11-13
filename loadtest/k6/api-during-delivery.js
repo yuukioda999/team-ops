@@ -1,5 +1,8 @@
 // 配信の最中の API の試験(spec 008 AC-008-07)。loadtest:seed が書き出したログイン済みのセッションで、
 // 利用者の主な操作を続ける。全体の試験と同時に動かし、配信がないときの値とも比べる。
+// 配信の前はお知らせがまだ公開されていないので、表示と配信状況は配信の最中にしか呼ばれない。
+// 前と最中の比較は、両方にある操作(home・notices・roster)で行う。名簿は選手のいない条件(seed が
+// 選手を作らない)で、実際より軽い。
 //
 //   k6 run -e SESSIONS=/path/sessions.json -e API_URL=http://localhost:8000 -e DURATION=10m api-during-delivery.js
 import http from 'k6/http';
@@ -14,11 +17,16 @@ export const options = {
     // 1人あたり、2秒ごとに1つの画面を開く利用者を VUS 人
     users: { executor: 'constant-vus', vus: Number(__ENV.VUS || 50), duration: __ENV.DURATION || '10m' },
   },
-  thresholds: {
-    // 目標(AC-008-07)。満たさなくても試験は最後まで動かし、数字を残す
-    http_req_duration: [{ threshold: 'p(95)<300', abortOnFail: false }],
-    http_req_failed: [{ threshold: 'rate<0.01', abortOnFail: false }],
-  },
+  // 目標(AC-008-07)。満たさなくても試験は最後まで動かし、数字を残す。操作ごとにも書くと、
+  // k6 が操作ごとの p95 と失敗の割合を集計して summary に出す
+  thresholds: Object.fromEntries([
+    ['http_req_duration', ['p(95)<300']],
+    ['http_req_failed', ['rate<0.01']],
+    ...['home', 'notices', 'notice', 'status', 'roster'].flatMap((name) => [
+      [`http_req_duration{name:${name}}`, ['p(95)<300']],
+      [`http_req_failed{name:${name}}`, ['rate<0.01']],
+    ]),
+  ]),
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
 

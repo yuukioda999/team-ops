@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"net"
 	"net/http/httptest"
@@ -65,6 +66,58 @@ func TestAC_008_01_Sink(t *testing.T) {
 			}
 			if got.FirstAt == nil || got.LastAt == nil || got.LastAt.Before(*got.FirstAt) {
 				t.Errorf("first_at/last_at = %v/%v", got.FirstAt, got.LastAt)
+			}
+		})
+	}
+}
+
+// TestAC_008_01_OnlyFinishedMailIsCounted talks SMTP by hand: a message is counted only once its DATA
+// is finished, RSET forgets the recipients, and unknown commands get 502.
+func TestAC_008_01_OnlyFinishedMailIsCounted(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+		want  int
+		reply string
+	}{
+		{"AC-008-01 recipients without DATA are not counted", []string{"EHLO x", "MAIL FROM:<f@x.invalid>", "RCPT TO:<a@loadtest.invalid>", "QUIT"}, 0, "221"},
+		{"AC-008-01 RSET forgets the recipients", []string{"EHLO x", "MAIL FROM:<f@x.invalid>", "RCPT TO:<a@loadtest.invalid>", "RSET", "MAIL FROM:<f@x.invalid>", "DATA", ".", "QUIT"}, 0, "221"},
+		{"AC-008-01 an unknown command gets 502", []string{"EHLO x", "VRFY a@loadtest.invalid"}, 0, "502"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addr, c := startSink(t, 0)
+			conn, err := net.Dial("tcp", addr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = conn.Close() }()
+			r := bufio.NewReader(conn)
+			last := ""
+			readReply := func() {
+				for {
+					line, err := r.ReadString('\n')
+					if err != nil {
+						return
+					}
+					last = line
+					if len(line) < 4 || line[3] != '-' {
+						return
+					}
+				}
+			}
+			readReply() // greeting
+			for _, l := range tt.lines {
+				if _, err := conn.Write([]byte(l + "\r\n")); err != nil {
+					t.Fatal(err)
+				}
+				readReply()
+			}
+			if got := c.snapshot().Received; got != tt.want {
+				t.Errorf("received = %d, want %d", got, tt.want)
+			}
+			if len(last) < 3 || last[:3] != tt.reply {
+				t.Errorf("last reply = %q, want %s", last, tt.reply)
 			}
 		})
 	}

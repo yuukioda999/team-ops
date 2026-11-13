@@ -19,7 +19,10 @@ services:
       target: prod
     volumes: !reset []
     environment:
-      APP_ENV: local # local settings and keys (env/api.env); loadtest:seed runs only here
+      APP_ENV: local # local settings and keys (env/api.env)
+      # loadtest:seed (spec 008) runs only with this; the production settings never set it
+      LOADTEST_SEED_ENABLED: "true"
+      APP_DEBUG: "false" # as in production
       LOG_LEVEL: warning
 
   api-worker:
@@ -28,6 +31,7 @@ services:
     volumes: !reset []
     environment:
       LOG_LEVEL: warning
+      APP_DEBUG: "false"
     # FrankenPHP's own health check looks at its web server, which only the api container runs
     healthcheck:
       disable: true
@@ -38,6 +42,7 @@ services:
     volumes: !reset []
     environment:
       LOG_LEVEL: warning
+      APP_DEBUG: "false"
       LOG_STDERR_STREAM: /proc/1/fd/2
     healthcheck:
       disable: true

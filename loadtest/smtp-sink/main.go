@@ -12,6 +12,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"log"
@@ -89,7 +91,7 @@ func serve(conn net.Conn, delay time.Duration, c *counter) {
 		cmd := strings.ToUpper(strings.TrimSpace(line))
 		switch {
 		case strings.HasPrefix(cmd, "EHLO"):
-			reply("250-smtp-sink", "250-PIPELINING", "250-8BITMIME", "250 AUTH PLAIN LOGIN")
+			reply("250-smtp-sink", "250-PIPELINING", "250-8BITMIME", "250 AUTH PLAIN")
 		case strings.HasPrefix(cmd, "HELO"):
 			reply("250 smtp-sink")
 		case strings.HasPrefix(cmd, "AUTH"):
@@ -149,16 +151,22 @@ func address(s string) string {
 	return strings.ToLower(strings.TrimPrefix(s, "<"))
 }
 
-// counter counts the messages per recipient, to find mail sent twice (AC-008-08).
+// counter counts the messages per recipient, to find mail sent twice (AC-008-08). Recipients are kept
+// as the first 8 bytes of their SHA-256, so 300,000 of them take a few MB instead of tens of MB.
 type counter struct {
 	mu       sync.Mutex
 	received int
-	seen     map[string]int
+	seen     map[uint64]struct{}
 	first    time.Time
 	last     time.Time
 }
 
-func newCounter() *counter { return &counter{seen: map[string]int{}} }
+func newCounter() *counter { return &counter{seen: map[uint64]struct{}{}} }
+
+func key(address string) uint64 {
+	sum := sha256.Sum256([]byte(address))
+	return binary.BigEndian.Uint64(sum[:8])
+}
 
 func (c *counter) add(rcpts []string) {
 	now := time.Now()
@@ -166,7 +174,7 @@ func (c *counter) add(rcpts []string) {
 	defer c.mu.Unlock()
 	for _, to := range rcpts {
 		c.received++
-		c.seen[to]++
+		c.seen[key(to)] = struct{}{}
 	}
 	if c.first.IsZero() {
 		c.first = now
@@ -196,7 +204,7 @@ func (c *counter) snapshot() stats {
 func (c *counter) reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.received, c.seen, c.first, c.last = 0, map[string]int{}, time.Time{}, time.Time{}
+	c.received, c.seen, c.first, c.last = 0, map[uint64]struct{}{}, time.Time{}, time.Time{}
 }
 
 func (c *counter) handler() http.Handler {

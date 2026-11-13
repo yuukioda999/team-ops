@@ -50,19 +50,26 @@ jobs:
       matrix:
         test: ${{ fromJSON((inputs.test || 'both') == 'both' && '["relay","full"]' || format('["{0}"]', inputs.test)) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v7
         with:
           path: team-ops
       - name: Choose the API and relay branches
+        # The inputs go through the environment and are checked, never pasted into the script
+        env:
+          API_REF_INPUT: ${{ inputs.api_ref }}
+          RELAY_REF_INPUT: ${{ inputs.relay_ref }}
         run: |
+          for v in "$API_REF_INPUT" "$RELAY_REF_INPUT"; do
+            [[ -z "$v" || "$v" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "Not a branch name: $v" >&2; exit 1; }
+          done
           pick() { # $1 repository, $2 the branch given by hand
             if [ -n "$2" ]; then echo "$2"; return; fi
             if [ -n "$GITHUB_HEAD_REF" ] && git ls-remote --exit-code --heads "https://github.com/yuukioda999/$1" "$GITHUB_HEAD_REF" > /dev/null; then echo "$GITHUB_HEAD_REF"; else echo main; fi
           }
-          echo "API_REF=$(pick team-ops-api '${{ inputs.api_ref }}')" >> "$GITHUB_ENV"
-          echo "RELAY_REF=$(pick notify-relay '${{ inputs.relay_ref }}')" >> "$GITHUB_ENV"
+          echo "API_REF=$(pick team-ops-api "$API_REF_INPUT")" >> "$GITHUB_ENV"
+          echo "RELAY_REF=$(pick notify-relay "$RELAY_REF_INPUT")" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
           repository: yuukioda999/team-ops-api
@@ -116,39 +123,47 @@ jobs:
         run: |
           expected=$(( $TEAMS * 30 ))
           echo "EXPECTED=$expected" >> "$GITHUB_ENV"
-          # The notices go out at the start of a minute at least 4 minutes from now
-          at=$(date -u -d "@$(( ($(date +%s) / 60 + 5) * 60 ))" +%Y-%m-%dT%H:%M:%SZ)
+          # The notices go out at the start of a minute far enough ahead for the seed (about 1 minute
+          # per 1,000 teams at most, AC-008-02) and the 2-minute measurement without delivery
+          lead=$(( 5 + TEAMS / 1000 ))
+          at=$(date -u -d "@$(( ($(date +%s) / 60 + lead) * 60 ))" +%Y-%m-%dT%H:%M:%SZ)
           echo "STARTED=$at" >> "$GITHUB_ENV"
-          $COMPOSE exec -T api php artisan loadtest:seed --teams=$TEAMS --at="$at" --sessions=100 --sessions-out=/tmp/sessions.json
+          $COMPOSE exec -T api php artisan loadtest:seed --teams=$TEAMS --at="$at" --sessions=50 --sessions-out=/tmp/sessions.json \
+            | tee "$RUNNER_TEMP/result/seed.txt"
           $COMPOSE cp api:/tmp/sessions.json "$RUNNER_TEMP/sessions.json"
           # The API without delivery, for comparison (2 minutes, before the notices go out)
           k6 run --summary-export "$RUNNER_TEMP/result/k6-api-idle.json" \
             -e SESSIONS="$RUNNER_TEMP/sessions.json" -e API_URL=http://localhost:8000 -e DURATION=2m loadtest/k6/api-during-delivery.js \
             || echo "k6 ended with $? (a target was missed or a check failed); the run goes on"
           now=$(date +%s); start=$(date -d "$at" +%s)
-          [ "$start" -gt "$now" ] && sleep $(( start - now ))
-          # The API during the delivery: from the moment the notices go out, for 12 minutes
+          # If the seed and the first measurement ran past the start, the numbers would mix them in: stop
+          if [ "$now" -ge $(( start - 30 )) ]; then echo "The seed took too long: the notices go out at $at, it is $(date -u +%H:%M:%S)" >&2; exit 1; fi
+          sleep $(( start - now ))
+          # The API during the delivery: from the moment the notices go out until the last mail
+          # (the wait step below stops it with SIGINT; k6 still writes its summary)
           k6 run --summary-export "$RUNNER_TEMP/result/k6-api-during.json" \
-            -e SESSIONS="$RUNNER_TEMP/sessions.json" -e API_URL=http://localhost:8000 -e DURATION=12m loadtest/k6/api-during-delivery.js \
+            -e SESSIONS="$RUNNER_TEMP/sessions.json" -e API_URL=http://localhost:8000 -e DURATION=90m loadtest/k6/api-during-delivery.js \
             > "$RUNNER_TEMP/result/k6-api-during.txt" 2>&1 &
           echo "K6_PID=$!" >> "$GITHUB_ENV"
 
-      - name: Wait until every mail arrives (up to 30 minutes, or 3 minutes without any new mail)
+      - name: Wait until every mail arrives (up to 60 minutes, or 3 minutes without any new mail)
         run: |
-          last=-1; still=0
-          for i in $(seq 1 360); do
-            n=$(curl -fsS http://127.0.0.1:8025/stats | python3 -c 'import json,sys;print(json.load(sys.stdin)["received"])')
+          last=-1; still=0; done=
+          for i in $(seq 1 720); do
+            # Different addresses (unique), so mail sent twice does not end the wait early
+            n=$(curl -fsS http://127.0.0.1:8025/stats | python3 -c 'import json,sys;print(json.load(sys.stdin)["unique"])')
             echo "$(date -u +%H:%M:%S) received $n / $EXPECTED"
-            [ "$n" -ge "$EXPECTED" ] && break
+            if [ "$n" -ge "$EXPECTED" ]; then done=1; break; fi
             if [ "$n" = "$last" ]; then still=$((still + 5)); else still=0; fi
             if [ "$n" -gt 0 ] && [ "$still" -ge 180 ]; then echo "No new mail for 3 minutes; stopping the wait"; break; fi
             last=$n
             sleep 5
           done
+          [ -n "$done" ] || echo "STOPPED_WAITING=--stopped-waiting" >> "$GITHUB_ENV"
+          # Stop the API test at the last mail, so that it covers the delivery and nothing after it
+          if [ -n "${K6_PID:-}" ]; then kill -INT "$K6_PID" 2>/dev/null || true; while kill -0 "$K6_PID" 2>/dev/null; do sleep 2; done; fi
           # A little longer, so that mail sent twice would also be counted
           sleep 20
-          # The API test runs 12 minutes from the start; wait for it to finish (it was started in the step before)
-          if [ -n "${K6_PID:-}" ]; then while kill -0 "$K6_PID" 2>/dev/null; do sleep 5; done; fi
 
       - name: Collect the result
         if: always()
@@ -156,6 +171,7 @@ jobs:
         run: |
           python3 loadtest/collect.py "$RUNNER_TEMP/result" --test ${{ matrix.test }} --teams $TEAMS \
             --expected "$EXPECTED" --started "$STARTED" --label "$LABEL delay=${SINK_DELAY_MS}ms limits=$LIMITS" \
+            --seed-log "$RUNNER_TEMP/result/seed.txt" ${STOPPED_WAITING:-} \
             | tee -a "$GITHUB_STEP_SUMMARY"
           $COMPOSE logs --no-color --tail=200 api api-worker api-scheduler notify-relay > "$RUNNER_TEMP/result/logs.txt" 2>&1
           # The errors also go to the job log, to read them without downloading the artifact
