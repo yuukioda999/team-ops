@@ -1,0 +1,164 @@
+name: Load test
+
+# spec 008 / ADR-0023. Run by hand from the Actions tab. Each test gets a fresh machine and a fresh
+# environment, so the numbers of one test do not include the other. The results are kept as an
+# artifact; a person checks them and commits them to loadtest/results/.
+on:
+  # A small run (1,000 teams) checks the tools when they change. The API and relay branches of the
+  # same name are used when they exist, so changes across repositories can be checked together
+  pull_request:
+    paths: ['loadtest/**', '.github/workflows/loadtest.yml']
+  workflow_dispatch:
+    inputs:
+      test:
+        description: relay (notify-relay alone), full (scheduled notices to the sink) or both
+        type: choice
+        options: [both, relay, full]
+        default: both
+      teams:
+        description: Teams of 30 (10000 = 300,000 mails)
+        type: choice
+        options: ['1000', '10000']
+        default: '1000'
+      sink_delay_ms:
+        description: The sink waits this long before answering each mail (ms)
+        default: '50'
+      limits:
+        description: none, or vps (3 cores and 2 GB, like the demo server)
+        type: choice
+        options: [none, vps]
+        default: none
+      label:
+        description: A short note kept with the result (e.g. before / after)
+        default: ''
+      api_ref: { description: team-ops-api branch (empty = main), default: '' }
+      relay_ref: { description: notify-relay branch (empty = main), default: '' }
+
+permissions:
+  contents: read
+
+env:
+  SINK_DELAY_MS: ${{ inputs.sink_delay_ms || '50' }}
+  TEAMS: ${{ inputs.teams || '1000' }}
+  LIMITS: ${{ inputs.limits || 'none' }}
+  LABEL: ${{ inputs.label || 'pull request' }}
+
+jobs:
+  run:
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ${{ fromJSON((inputs.test || 'both') == 'both' && '["relay","full"]' || format('["{0}"]', inputs.test)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: team-ops
+      - name: Choose the API and relay branches
+        run: |
+          pick() { # $1 repository, $2 the branch given by hand
+            if [ -n "$2" ]; then echo "$2"; return; fi
+            if [ -n "$GITHUB_HEAD_REF" ] && git ls-remote --exit-code --heads "https://github.com/yuukioda999/$1" "$GITHUB_HEAD_REF" > /dev/null; then echo "$GITHUB_HEAD_REF"; else echo main; fi
+          }
+          echo "API_REF=$(pick team-ops-api '${{ inputs.api_ref }}')" >> "$GITHUB_ENV"
+          echo "RELAY_REF=$(pick notify-relay '${{ inputs.relay_ref }}')" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/team-ops-api
+          ref: ${{ env.API_REF }}
+          path: team-ops-api
+      # Not started, but compose.yaml refers to it
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/team-ops-web
+          path: team-ops-web
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/notify-relay
+          ref: ${{ env.RELAY_REF }}
+          path: notify-relay
+      - uses: grafana/setup-k6-action@v1
+
+      - name: Start the services (production images, the sink in place of Mailpit)
+        working-directory: team-ops
+        run: |
+          files="-f compose.yaml -f loadtest/compose.loadtest.yaml"
+          [ "$LIMITS" = "vps" ] && files="$files -f loadtest/compose.vps-limits.yaml"
+          echo "COMPOSE=docker compose $files" >> "$GITHUB_ENV"
+          docker compose $files build mailpit api api-worker api-scheduler notify-relay
+          docker compose $files up -d --wait mysql mailpit
+          docker compose $files run --rm --no-deps api php artisan migrate --force
+          docker compose $files up -d --wait api notify-relay
+          docker compose $files up -d api-worker api-scheduler
+          nproc; free -m
+          docker compose $files ps
+
+      - name: Record CPU and memory every 5 seconds
+        run: |
+          mkdir -p "$RUNNER_TEMP/result"
+          (while true; do docker stats --no-stream --format '{{.Name}},{{.CPUPerc}},{{.MemUsage}}' | sed "s/^/$(date -u +%H:%M:%S),/"; sleep 5; done) > "$RUNNER_TEMP/result/docker-stats.csv" &
+
+      - name: relay alone (AC-008-05)
+        if: matrix.test == 'relay'
+        working-directory: team-ops
+        run: |
+          expected=$(( $TEAMS * 30 ))
+          echo "EXPECTED=$expected" >> "$GITHUB_ENV"
+          echo "STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          k6 run --summary-export "$RUNNER_TEMP/result/k6-relay.json" \
+            -e REQUESTS=$(( expected / 1000 )) -e RELAY_URL=http://localhost:8080 loadtest/k6/relay-direct.js
+
+      - name: full, with the API used during the delivery (AC-008-06・07)
+        if: matrix.test == 'full'
+        working-directory: team-ops
+        run: |
+          expected=$(( $TEAMS * 30 ))
+          echo "EXPECTED=$expected" >> "$GITHUB_ENV"
+          # The notices go out at the start of a minute at least 4 minutes from now
+          at=$(date -u -d "@$(( ($(date +%s) / 60 + 5) * 60 ))" +%Y-%m-%dT%H:%M:%SZ)
+          echo "STARTED=$at" >> "$GITHUB_ENV"
+          $COMPOSE exec -T api php artisan loadtest:seed --teams=$TEAMS --at="$at" --sessions=100 --sessions-out=/tmp/sessions.json
+          $COMPOSE cp api:/tmp/sessions.json "$RUNNER_TEMP/sessions.json"
+          # The API without delivery, for comparison (2 minutes, before the notices go out)
+          k6 run --summary-export "$RUNNER_TEMP/result/k6-api-idle.json" \
+            -e SESSIONS="$RUNNER_TEMP/sessions.json" -e API_URL=http://localhost:8000 -e DURATION=2m loadtest/k6/api-during-delivery.js
+          now=$(date +%s); start=$(date -d "$at" +%s)
+          [ "$start" -gt "$now" ] && sleep $(( start - now ))
+          # The API during the delivery: from the moment the notices go out, for 12 minutes
+          k6 run --summary-export "$RUNNER_TEMP/result/k6-api-during.json" \
+            -e SESSIONS="$RUNNER_TEMP/sessions.json" -e API_URL=http://localhost:8000 -e DURATION=12m loadtest/k6/api-during-delivery.js \
+            > "$RUNNER_TEMP/result/k6-api-during.txt" 2>&1 &
+          echo "K6_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait until every mail arrives (up to 30 minutes)
+        run: |
+          for i in $(seq 1 360); do
+            n=$(curl -fsS http://127.0.0.1:8025/stats | python3 -c 'import json,sys;print(json.load(sys.stdin)["received"])')
+            echo "$(date -u +%H:%M:%S) received $n / $EXPECTED"
+            [ "$n" -ge "$EXPECTED" ] && break
+            sleep 5
+          done
+          # A little longer, so that mail sent twice would also be counted
+          sleep 20
+          # The API test runs 12 minutes from the start; wait for it to finish (it was started in the step before)
+          if [ -n "${K6_PID:-}" ]; then while kill -0 "$K6_PID" 2>/dev/null; do sleep 5; done; fi
+
+      - name: Collect the result
+        if: always()
+        working-directory: team-ops
+        run: |
+          python3 loadtest/collect.py "$RUNNER_TEMP/result" --test ${{ matrix.test }} --teams $TEAMS \
+            --expected "$EXPECTED" --started "$STARTED" --label "$LABEL delay=${SINK_DELAY_MS}ms limits=$LIMITS" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          $COMPOSE logs --no-color --tail=200 api api-worker api-scheduler notify-relay > "$RUNNER_TEMP/result/logs.txt" 2>&1
+          printf 'api_ref=%s\napi_sha=%s\nrelay_ref=%s\nrelay_sha=%s\nteam_ops_sha=%s\n' \
+            "$API_REF" "$(git -C ../team-ops-api rev-parse HEAD)" "$RELAY_REF" "$(git -C ../notify-relay rev-parse HEAD)" "$(git rev-parse HEAD)" \
+            > "$RUNNER_TEMP/result/versions.txt"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: loadtest-${{ matrix.test }}-${{ env.TEAMS }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/result
+          retention-days: 90
