@@ -6,6 +6,7 @@ import http from 'k6/http';
 import crypto from 'k6/crypto';
 import encoding from 'k6/encoding';
 import { check } from 'k6';
+import exec from 'k6/execution';
 
 const REQUESTS = Number(__ENV.REQUESTS || 300);
 const PER_REQUEST = 1000;
@@ -29,7 +30,8 @@ export const options = {
 };
 
 export default function () {
-  const n = __ITER; // 0 から REQUESTS-1
+  // 試験全体での通し番号(0 から REQUESTS-1)。__ITER は VU ごとの番号なので使わない
+  const n = exec.scenario.iterationInTest;
   const recipients = [];
   for (let i = 0; i < PER_REQUEST; i++) {
     recipients.push({ recipient_ref: `r${n}-${i}`, email: `relay-${RUN}-${n}-${i}@loadtest.invalid` });
