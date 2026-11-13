@@ -4,7 +4,7 @@ plan.md をもとにした作業の一覧。上から順に進める。各タス
 
 凡例:`[api]` team-ops-api、`[relay]` notify-relay、`[web]` team-ops-web、`[ops]` team-ops
 
-**進み具合(2026-11-06):T01〜T31 完了。T32〜T35 は後の作業。** T30 の最終レビューの指摘と判断は [review-t30.md](review-t30.md) にある。
+**進み具合(2026-11-08):T01〜T31 と T35 完了(T35 は ADR-0022 で FrankenPHP に決定)。T32〜T34 は後の作業。** T30 の最終レビューの指摘と判断は [review-t30.md](review-t30.md) にある。
 
 ## 1. 土台
 
