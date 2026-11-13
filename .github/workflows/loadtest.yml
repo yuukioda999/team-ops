@@ -133,12 +133,16 @@ jobs:
             > "$RUNNER_TEMP/result/k6-api-during.txt" 2>&1 &
           echo "K6_PID=$!" >> "$GITHUB_ENV"
 
-      - name: Wait until every mail arrives (up to 30 minutes)
+      - name: Wait until every mail arrives (up to 30 minutes, or 3 minutes without any new mail)
         run: |
+          last=-1; still=0
           for i in $(seq 1 360); do
             n=$(curl -fsS http://127.0.0.1:8025/stats | python3 -c 'import json,sys;print(json.load(sys.stdin)["received"])')
             echo "$(date -u +%H:%M:%S) received $n / $EXPECTED"
             [ "$n" -ge "$EXPECTED" ] && break
+            if [ "$n" = "$last" ]; then still=$((still + 5)); else still=0; fi
+            if [ "$n" -gt 0 ] && [ "$still" -ge 180 ]; then echo "No new mail for 3 minutes; stopping the wait"; break; fi
+            last=$n
             sleep 5
           done
           # A little longer, so that mail sent twice would also be counted

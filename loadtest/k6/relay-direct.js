@@ -52,5 +52,8 @@ export default function () {
     },
     tags: { name: 'create_delivery' },
   });
-  check(res, { 'accepted (202)': (r) => r.status === 202 });
+  if (!check(res, { 'accepted (202)': (r) => r.status === 202 })) {
+    // 断られた理由を残す(本文は notify-relay のエラーの説明だけで、宛先は含まない)
+    console.warn(`request ${n}: ${res.status} ${String(res.body).slice(0, 300)}`);
+  }
 }
