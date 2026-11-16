@@ -100,6 +100,11 @@ jobs:
           docker compose -f compose.yaml -f chaos/compose.chaos.yaml logs --no-color notify-relay api-worker api-scheduler > "$RUNNER_TEMP/result/logs.txt" 2>&1 || true
           # The API, the worker and the scheduler write the Laravel log to the mounted code (redacted, ADR-0003)
           cp ../team-ops-api/storage/logs/laravel.log "$RUNNER_TEMP/result/" 2>/dev/null || true
+          # The errors also go to the job log, to read them without the artifact (notify-relay logs only email_ref, ADR-0003)
+          echo "== notify-relay errors (first 20)"
+          grep '"level":"ERROR"' "$RUNNER_TEMP/result/logs.txt" | cut -c1-600 | head -20 || true
+          echo "== Laravel errors (first 20, without the stack traces)"
+          grep -E '\.(ERROR|CRITICAL):' "$RUNNER_TEMP/result/laravel.log" 2>/dev/null | cut -c1-600 | head -20 || true
           printf 'api_sha=%s\nrelay_sha=%s\nteam_ops_sha=%s\n' \
             "$(git -C ../team-ops-api rev-parse HEAD)" "$(git -C ../notify-relay rev-parse HEAD)" "$(git rev-parse HEAD)" \
             > "$RUNNER_TEMP/result/versions.txt"
