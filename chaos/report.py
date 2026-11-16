@@ -20,6 +20,7 @@ import urllib.request
 
 COMPOSE = ["docker", "compose", "-f", "compose.yaml", "-f", "chaos/compose.chaos.yaml"]
 MAILPIT = "http://127.0.0.1:8025"
+SEND_CONCURRENCY = 50  # notify-relay の既定(開発用の compose では変えていない)
 
 
 def sql(query: str) -> list[list[str]]:
@@ -95,7 +96,7 @@ def main() -> None:
         " join notify_relay.deliveries d on d.id = r.delivery_id"
         " join team_ops.notice_recipients n"
         "   on n.notice_id = cast(substring_index(substring_index(d.dedupe_key, ':notice:', -1), ':', 1) as unsigned)"
-        "  and r.recipient_ref = concat('user_', n.user_id)")[0])
+        "  and r.recipient_ref = convert(concat('user_', n.user_id) using utf8mb4) collate utf8mb4_bin")[0])
     not_completed = int(sql("select count(*) from notify_relay.deliveries where completed_at is null")[0][0])
 
     failed = api.get("failed", 0)
@@ -106,11 +107,11 @@ def main() -> None:
     def secs(a, b):
         return "-" if a is None or b is None else f"{(b - a).total_seconds():.0f} 秒"
 
-    sending_before = None
+    left_sending = None
     for line in timeline:
-        m = re.search(r"sending just before: (\d+)", line)
+        m = re.search(r"recipients left sending: (\d+)", line)
         if m:
-            sending_before = int(m.group(1))
+            left_sending = int(m.group(1))
 
     base = missing == 0 and api.get("pending", 0) == 0 and mismatch == 0 and joined == expected
     checks = {
@@ -118,7 +119,8 @@ def main() -> None:
         "smtp-perm": base and twice == 0 and failed > 0 and failed == relay.get("failed", 0) == expected - unique
         and set(failed_attempts) == {"1"},
         "relay-stop": base and twice == 0 and api.get("delivered", 0) == expected,
-        "relay-kill": base and (sending_before is not None and extra <= sending_before),
+        # 判断4:二重に届いた数が、同時に送る数(SEND_CONCURRENCY、50)以下なら設計どおり
+        "relay-kill": base and extra <= SEND_CONCURRENCY,
         "api-down": base and twice == 0 and api.get("delivered", 0) == expected,
     }
     ok = checks[scenario]
@@ -163,8 +165,9 @@ def main() -> None:
         f"| アウトボックスの状態 | {json.dumps(outbox, ensure_ascii=False)} |",
         f"| アウトボックスの送信の回数(回数: 件数) | {json.dumps(outbox_attempts, ensure_ascii=False)} |",
     ]
-    if sending_before is not None:
-        lines.append(f"| 強制終了の直前に送信中だった宛先 | {sending_before:,}(二重配信はこの数以下なら設計どおり) |")
+    if left_sending is not None:
+        lines.append(f"| 強制終了のあとに sending のまま残った宛先 | {left_sending:,}(取り出した分で、送ったかどうかは問わない。起動時に pending に戻る) |")
+        lines.append(f"| 二重配信の上限(同時に送る数) | {SEND_CONCURRENCY} |")
     lines += ["", "## 警告とエラーのログ(メッセージごとの件数、上位10件)", "", "| サービス | メッセージ | 件数 |", "|---|---|---|"]
     lines += log_summary("notify-relay", compose_logs("notify-relay"))
     # API・worker・scheduler は、開発用の構成では同じファイル(マウントしたコードの storage/logs)に書く

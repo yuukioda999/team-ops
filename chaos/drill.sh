@@ -78,27 +78,37 @@ case "$SCENARIO" in
   relay-kill)
     # AC-009-06: SIGKILL while sending (after 10% of the mail), started again 10 seconds later
     wait_mails $(( expected / 10 ))
-    before=$(relay_sending)
     "${COMPOSE[@]}" kill -s SIGKILL notify-relay > /dev/null 2>&1
-    log "fault on: notify-relay killed (SIGKILL) at $(mails) mails; recipients marked sending just before: $before, after: $(relay_sending)"
+    # "sending" covers the claimed recipients (up to 500 at a time), sent or not; those not sent go
+    # back to pending at the start and are sent once. Only mail sent but not yet recorded can arrive
+    # twice, at most as many as are sent at the same time (SEND_CONCURRENCY, 50)
+    log "fault on: notify-relay killed (SIGKILL) at $(mails) mails; recipients left sending: $(relay_sending)"
     sleep 10
     "${COMPOSE[@]}" start notify-relay > /dev/null 2>&1
     log "fault off: notify-relay started"
     ;;
   api-down)
-    # AC-009-07: the API (which receives the result webhooks) stops while sending, for 2 minutes
-    wait_mails $(( expected / 10 ))
+    # AC-009-07: the API (which receives the result webhooks) is down from just before the notices go
+    # out until 2 minutes after. The scheduler and the worker keep running, so the notices are still
+    # published and sent; only the results cannot come back. (3,000 mails go out in about 10 seconds,
+    # so stopping it after the first mails would be too late.)
+    wait_until $(( at_epoch - 5 ))
     "${COMPOSE[@]}" stop api > /dev/null 2>&1
-    log "fault on: API stopped at $(mails) mails"
-    sleep 120
+    log "fault on: API stopped"
+    wait_until $(( at_epoch + 120 ))
+    log "while the API was down: $(mails) mails arrived; API results still pending: $(sql "select count(*) from team_ops.notice_recipients where delivery_status='pending'")"
     "${COMPOSE[@]}" start api > /dev/null 2>&1
     until curl -fsS http://127.0.0.1:8000/api/health > /dev/null 2>&1; do sleep 2; done
     log "fault off: API started and healthy"
     ;;
 esac
 
-# Wait until every recipient has a final state everywhere (or the deadline)
+# Wait until every notice is published (before that, nothing is left to wait for), then until every
+# recipient has a final state everywhere (or the deadline)
 deadline=$(( at_epoch + DEADLINE_MIN * 60 ))
+wait_until "$at_epoch"
+until [ "$(sql "select count(*) from team_ops.notices where status='published'")" -ge "$TEAMS" ] || [ "$(date +%s)" -ge "$deadline" ]; do sleep 2; done
+log "published: $(sql "select count(*) from team_ops.notices where status='published'") notices"
 while :; do
   left=$(unfinished)
   if [ "$left" = "0" ]; then log "every recipient final (API, notify-relay and the outbox)"; break; fi
