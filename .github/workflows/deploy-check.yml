@@ -106,7 +106,8 @@ jobs:
           test "$(docker compose -f compose.prod.yaml exec -T alloy id -u)" = 473
           sleep 20
           docker compose -f compose.prod.yaml logs alloy | tail -20
-          ! docker compose -f compose.prod.yaml logs alloy | grep -iE 'permission denied|error while listing containers'
+          # Any error fails the check, except the one about udev, which a container cannot read (disk names only)
+          ! docker compose -f compose.prod.yaml logs alloy | grep 'level=error' | grep -v 'disabling udev device properties'
 
       - uses: actions/setup-node@v7
         with:
