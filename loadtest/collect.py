@@ -41,6 +41,47 @@ def seconds(start: dt.datetime | None, end: dt.datetime | None) -> float | None:
     return None if start is None or end is None else round((end - start).total_seconds(), 1)
 
 
+def cpu_table(path: pathlib.Path) -> list[str]:
+    """docker-stats.csv(5秒ごとの docker stats)を、サービスごとの CPU とメモリの表にする。"""
+    if not path.exists():
+        return []
+    cpu: dict[str, list[float]] = {}
+    mem: dict[str, float] = {}
+    total: dict[str, float] = {}
+    units = {"B": 1 / 1024 / 1024, "KiB": 1 / 1024, "MiB": 1, "GiB": 1024}
+    for row in path.read_text().splitlines():
+        parts = row.split(",")
+        if len(parts) != 4 or not parts[2].endswith("%"):
+            continue
+        at, name, _, usage = parts
+        try:
+            c = float(parts[2].rstrip("%"))
+        except ValueError:
+            continue
+        cpu.setdefault(name, []).append(c)
+        total[at] = total.get(at, 0) + c
+        used = usage.split("/")[0].strip()
+        for unit, mib in sorted(units.items(), key=lambda u: -len(u[0])):
+            if used.endswith(unit):
+                try:
+                    mem[name] = max(mem.get(name, 0), float(used[: -len(unit)]) * mib)
+                except ValueError:
+                    pass
+                break
+    if not cpu:
+        return []
+    lines = ["", "## CPU とメモリ(5秒ごとの docker stats。CPU の 100% は1コア分。k6 はコンテナの外で動くので含まない)", "",
+             "| コンテナ | CPU の平均 | CPU の最大 | メモリの最大 |", "|---|---|---|---|"]
+    for name in sorted(cpu):
+        v = cpu[name]
+        lines.append(f"| {name} | {sum(v) / len(v):.0f}% | {max(v):.0f}% | {mem.get(name, 0):.0f} MiB |")
+    t = list(total.values())
+    cores = path.with_name("nproc.txt")
+    note = f"(マシンは {cores.read_text().strip()} コア)" if cores.exists() else ""
+    lines.append(f"| 合計{note} | {sum(t) / len(t):.0f}% | {max(t):.0f}% | |")
+    return lines
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
@@ -139,6 +180,7 @@ def main() -> None:
         ]
     if seed_seconds is not None:
         lines.append(f"| 試験データの作成 | {seed_seconds} 秒(目標 1万チームで 600 秒以内) |")
+    lines += cpu_table(out / "docker-stats.csv")
     (out / "summary.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 

@@ -4,16 +4,17 @@
 
 Laravel・React・Go の4つのリポジトリで作り、**要件定義から公開・運用の準備まで、AI(Claude Code)と仕様駆動で進めた記録**をすべて公開しています。
 
-> **現在の状況(2026年11月):第1弾の機能 001〜007 が完成。** 本番と同じ構成を CI で毎日起動して確かめており、3つのイメージも GitHub のコンテナ置き場(GHCR)にそろっています。手順書どおりに VPS を用意すれば公開できます(公開先は応募の時期に合わせて用意します)。負荷試験と障害訓練の振り返りは、次に追加します。
+> **現在の状況(2026年11月):第1弾の機能 001〜007 が完成。** 本番と同じ構成を CI で毎日起動して確かめており、3つのイメージも GitHub のコンテナ置き場(GHCR)にそろっています。手順書どおりに VPS を用意すれば公開できます(公開先は応募の時期に合わせて用意します)。負荷試験(spec 008)を終え、障害訓練の振り返りは次に追加します。
 
 ## 30秒で分かること
 
 | | |
 |---|---|
 | **何を作ったか** | チームの作成と招待、名簿(CSV の一括登録)、役割と権限、お知らせ(予約送信)、既読と配信状況、未読の人への再通知、誰でも試せるデモモード |
-| **どう作ったか** | 機能ごとに 受け入れ基準 → 計画(選択肢と推奨)→ 人間が判断 → ADR → 実装 → AI のレビュー → 人間が指摘ごとに判断、の順。[ADR 22本](docs/adr/)、[機能仕様 7本](specs/)、[AI 活用の記録 8本](docs/ai-log/) |
+| **どう作ったか** | 機能ごとに 受け入れ基準 → 計画(選択肢と推奨)→ 人間が判断 → ADR → 実装 → AI のレビュー → 人間が指摘ごとに判断、の順。[ADR 24本](docs/adr/)、[機能仕様 8本](specs/)、[AI 活用の記録 9本](docs/ai-log/) |
 | **品質** | API のテスト 531件(SQLite と、CI の MySQL 8.4 の両方で実行)、画面のテスト 180件、Go のテスト(テーブル駆動、`-race` で並行処理も検証)、全サービスを通した E2E。テスト名に受け入れ基準の ID を入れて対応を追えるようにしています |
 | **設計の芯** | 個人情報を「持たない」設計(ADR-0003)、他チームのデータは必ず 404(マルチテナント)、メール配信を Go に切り出して二重配信と取りこぼしを防ぐ(ADR-0002・0019) |
+| **負荷試験** | 30万通(1万チーム)の配信を CI で測りました。全体の試験は直す前 904・931秒 → 直したあと 418・576秒で、2回とも目標の 600秒以内。relay 単体は5回中2回しか 600秒に入らず、まだ満たせていません。二重配信と取りこぼしは全回0。試したが速くならなかった変更も[そのまま記録](loadtest/README.md) |
 | **公開の準備** | FrankenPHP・Caddy・Docker Compose の本番構成、手順書、毎日の構成チェック(HTTPS で E2E、外に出ているのは Caddy だけ、バックアップから戻せる) |
 
 ## 画面
@@ -50,6 +51,7 @@ flowchart TD
 - **判断は人間**:AI は選択肢と推奨を示すところで止まります。たとえば 007 では、計画の判断6件とレビューの指摘21件について、AI が番号ごとに推奨を示し、人間が全件の扱いを決めました(レビューは17件を直し、4件は直さない。直す途中で決定どおりにできないと分かった1件は、改めて人間が判断)([007 の ai-log](docs/ai-log/2026-11-08-007-demo-mode.md))
 - **AI の間違いを記録する**:どの ai-log にも「AI が間違えた点と学び」があります。例:メールの削除を「1回でうまくいく前提」で書いていた、ADR に検索できない列を条件として書いていた、ログの伏せ字でリクエストの側しか見ていなかった
 - **前提を問い直すのも人間**:公開の準備では、AI は VPS の契約を前提に案内していました。人間が「VPS は必須か」と問い、AI が比較を示し、人間が「README・負荷試験・障害訓練を先に進める」を選びました([公開の準備の ai-log](docs/ai-log/2026-11-08-001-T35-deploy-preparation.md))
+- **測って効果がなければ入れない**:負荷試験では、AI が推奨したコードの変更2つ(公開の並列化、relay の連続取り出し)を測ったところ、速くならないか差が出ませんでした。どちらもマージせず、ADR を取り下げて理由と数字を残しています([008 の ai-log](docs/ai-log/2026-11-16-008-load-test.md))
 
 ## 見どころ(どこを見れば何が分かるか)
 
@@ -62,6 +64,7 @@ flowchart TD
 | 全サービスを通したテスト | [E2E(Playwright)](e2e/tests/)。CI の [smoke](.github/workflows/smoke.yml) が docker compose の環境に対して毎回動かします |
 | Laravel の作り | Controller → UseCase → Model の層分け、Policy による権限、[アウトボックスと配信の依頼](https://github.com/yuukioda999/team-ops-api/tree/main/app/Support/NotifyRelay)、[配信結果の webhook の受け取りと照合](https://github.com/yuukioda999/team-ops-api/tree/main/app/UseCases/Deliveries) |
 | Go の作り | [notify-relay](https://github.com/yuukioda999/notify-relay):domain・usecase・adapter・infra の層分け、同時に送る数の上限、再送、[重複防止とデッドロック時のやり直し](https://github.com/yuukioda999/notify-relay/blob/main/internal/infra/mysqlstore/store.go)、結果の webhook のまとめ送り |
+| 負荷試験と、うまくいかなかった直し方 | [結果と次の手](loadtest/README.md)、[取り下げた ADR-0024](docs/adr/0024-publish-scheduled-notices-in-parallel.md)、[008 の ai-log](docs/ai-log/2026-11-16-008-load-test.md) |
 | 公開と運用の準備 | [本番の構成](deploy/)、[手順書](docs/runbook/)、[毎日の構成チェック](.github/workflows/deploy-check.yml) |
 
 ## 構成
@@ -155,6 +158,7 @@ make e2e    # 起動中の環境に対して、ブラウザで全機能の流れ
 | 機能仕様(受け入れ基準付き) | [specs/](specs/) |
 | AI 活用の記録 | [docs/ai-log/](docs/ai-log/) |
 | 運用の手順書 | [docs/runbook/](docs/runbook/) |
+| 負荷試験 | [loadtest/](loadtest/) |
 | 構成・設計 | [docs/design/](docs/design/) |
 
 ## ライセンス
