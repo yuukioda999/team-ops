@@ -4,7 +4,7 @@
 - 種類:障害訓練(spec 009 の AC-009-07)
 - 判定:期待どおり
 - 記録:https://github.com/yuukioda999/team-ops/actions/runs/43850003897(90日で消える)
-- 確かめたコード:team-ops a25ccd9、team-ops-api ec04c8e、notify-relay 7f60c9b
+- 確かめたコード:team-ops 9d1b2ae(PR のブランチの先頭)、team-ops-api ec04c8e(のちに作者だけを直して ecfbea5 と同じ中身)、notify-relay 7f60c9b(main)。このあと API は、送信ジョブの結果の書き方を直した(ffc3193 以降)。その版でも、同じ訓練を run 43856747950 で動かし、5種類とも期待どおりだった
 
 ## 概要
 
@@ -44,7 +44,7 @@ API が止まっていた。訓練で起こしたもの。
 
 - なし(期待どおり)。webhook の送り直しは最大1時間おきなので、長く止まると、そろうまで最大1時間かかる。手順書に書いた
 
-## 付録:訓練の結果(chaos/report.py の出力)
+## 付録:訓練の結果(chaos/report.py の出力をそのまま。見出しの段だけ1つ下げた)
 
 ## 障害訓練の結果:api-down
 
@@ -100,3 +100,7 @@ API が止まっていた。訓練で起こしたもの。
 | アウトボックスの送信の回数(回数: 件数) | {"1": "100"} |
 
 ### 警告とエラーのログ(メッセージごとの件数、上位10件)
+
+| サービス | メッセージ | 件数 |
+|---|---|---|
+| notify-relay | WARN webhook was not accepted; will retry | 400 |

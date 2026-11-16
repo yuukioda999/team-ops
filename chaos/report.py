@@ -89,7 +89,9 @@ def judge(scenario: str, s: Summary, facts: dict[str, str]) -> list[tuple[str, b
         "relay-kill": [("当たった:送信の途中(届いた数が0より多く、全員より少ない)で止めた",
                         0 < f.get("mails_at_kill", 0) < expected)],
         "api-down": [("当たった:止まっている間、配信結果が API に届いていない",
-                      f.get("pending_while_down", 0) > 0)],
+                      f.get("pending_while_down", 0) > 0),
+                     ("当たった:止まっている間も送信は続いた(公開と送信は API の外で動く)",
+                      f.get("mails_while_down", 0) > 0)],
     }[scenario]
     common = [
         ("宛先の数が API・notify-relay・試験データでそろう",
@@ -217,8 +219,9 @@ def main() -> None:
         "api-down": [("API が応答できるようになってから配信状況がそろうまで(2秒おきに確かめた)", secs(epoch("fault_off"), epoch("all_final")))],
     }[scenario]
 
+    # 時刻で安定に並べる(同じ秒のできごとは書いた順のまま。予約の時刻は同じ秒のできごとの前に置く)
     timeline = (out / "timeline.txt").read_text().splitlines()
-    timeline = sorted(timeline + [f"{at:%H:%M:%S} 予約の時刻(お知らせの公開)"])
+    timeline = sorted([f"{at:%H:%M:%S} 予約の時刻(お知らせの公開)"] + timeline, key=lambda line: line[:8])
 
     attempts = collections.Counter(r.attempts for r in s.recipients.values())
     outbox = dict(sql("select status, count(*) from team_ops.outbox_messages group by status"))

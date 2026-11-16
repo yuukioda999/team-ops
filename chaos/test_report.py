@@ -63,13 +63,15 @@ class ReportTest(unittest.TestCase):
     def test_AC_009_07_results_must_have_been_held_back_while_the_api_was_down(self):
         s = summary([DELIVERED] * 2)
 
-        self.assertTrue(ok(judge("api-down", s, {"teams": "1", "pending_while_down": "2"})))
-        self.assertFalse(ok(judge("api-down", s, {"teams": "1", "pending_while_down": "0"})))
+        self.assertTrue(ok(judge("api-down", s, {"teams": "1", "pending_while_down": "2", "mails_while_down": "2"})))
+        self.assertFalse(ok(judge("api-down", s, {"teams": "1", "pending_while_down": "0", "mails_while_down": "2"})))
+        # 送信も止まっていたなら、確かめたいこと(結果だけが届かない)は起きていない
+        self.assertFalse(ok(judge("api-down", s, {"teams": "1", "pending_while_down": "2", "mails_while_down": "0"})))
 
     def test_AC_009_02_recipients_missing_on_one_side_are_not_as_expected(self):
         s = summary([DELIVERED, Recipient(received=1, api="delivered", relay="-", attempts=0)])
 
-        self.assertFalse(ok(judge("api-down", s, {"teams": "1", "pending_while_down": "2"})))
+        self.assertFalse(ok(judge("api-down", s, {"teams": "1", "pending_while_down": "2", "mails_while_down": "2"})))
 
 
 if __name__ == "__main__":

@@ -1,16 +1,16 @@
-# notify-relay が3分止まっても依頼は失われず、手順どおり送り直すと5秒で送り終えた。ただし受け付けの deadlock で6分遅れた回があった
+# notify-relay が3分止まっても依頼は失われず、手順どおり送り直すと5秒で送り終えた。ただし約6分遅れた回があり、受け付けの deadlock と見ている
 
 - 日付:2026-11-16
 - 種類:障害訓練(spec 009 の AC-009-05・AC-009-12)
 - 判定:期待どおり
 - 記録:https://github.com/yuukioda999/team-ops/actions/runs/43850003897(90日で消える)
-- 確かめたコード:team-ops a25ccd9、team-ops-api ec04c8e、notify-relay 7f60c9b
+- 確かめたコード:team-ops 9d1b2ae(PR のブランチの先頭)、team-ops-api ec04c8e(のちに作者だけを直して ecfbea5 と同じ中身)、notify-relay 7f60c9b(main)。このあと API は、送信ジョブの結果の書き方を直した(ffc3193 以降)。その版でも、同じ訓練を run 43856747950 で動かし、5種類とも期待どおりだった
 
 ## 概要
 
 お知らせの公開の30秒前に notify-relay を止め、公開の3分10秒後に起動した。止まっている間、API は100件の配信依頼をアウトボックスに持ったまま送り直しを続けた。起動のあと、手順書どおり `outbox:redispatch --now` を打つと、5秒で3,000人全員へちょうど1通ずつ届いた。
 
-一方、同じ手順の前の run(https://github.com/yuukioda999/team-ops/actions/runs/43848283354)では、起動から最後の1通まで 350秒かかった。100件のうち1件だけ送り直しが1回多く、notify-relay の受け付けが失敗したと見ている(下の「原因」)。
+一方、同じ手順の前の run(https://github.com/yuukioda999/team-ops/actions/runs/43848283354)では、起動から最後の1通まで 350秒かかった。100件のうち1件だけ送り直しが1回多く、その run の notify-relay のログに受け付けの失敗(`accept delivery`)が1件出ていた。受け付けの deadlock と見ている(下の「原因」)。
 
 ## 影響
 
@@ -39,7 +39,7 @@
 
 notify-relay が止まっていた。訓練で起こしたもの。
 
-前の run の遅れの原因の見立て:起動の直後に100件の依頼が一度に届くと、notify-relay の受け付け(依頼と宛先の行の insert)が、送信の取り出し(宛先の行のロック)と MySQL の deadlock になることがある。後の run で、エラーの行(`accept delivery`、`Error 1213 Deadlock found`)を確かめた。notify-relay は送信の取り出しでは deadlock をやり直すが、受け付けではやり直さずに 503 を返す。API はそれを一時的な失敗として扱い、送り直しの間隔(このときは5分)を待った。前の run ではエラーの行を出していなかったので、遅れの1件が deadlock だったことは確かめていない。
+前の run の遅れの原因の見立て:起動の直後に100件の依頼が一度に届くと、notify-relay の受け付け(依頼と宛先の行の insert)が、送信の取り出し(宛先の行のロック)と MySQL の deadlock になることがある。後の run で、エラーの行の中身(`accept delivery`、`Error 1213 Deadlock found`)を確かめた。notify-relay は送信の取り出しでは deadlock をやり直すが、受け付けではやり直さずに 503 を返す。API はそれを一時的な失敗として扱い、送り直しの間隔(このときは5分)を待った。前の run では、受け付けの失敗のログが1件出ていた(件数だけで、エラーの中身は出していなかった)。アウトボックスの送信回数(99件が4回、1件が5回)とも合うので、この1件が遅れの原因と見ているが、deadlock だったことまでは確かめていない。
 
 ## どう戻したか
 
@@ -47,9 +47,16 @@ notify-relay が止まっていた。訓練で起こしたもの。
 
 ## 次の手
 
-- (決定済み、2026-11-16)notify-relay の受け付けでも、deadlock のときにやり直す(notify-relay #16)。やり直しだけでは同時に走らせるテストで失敗が残ったので、受け付けと取り出しのトランザクションを READ COMMITTED にする案(notify-relay の ADR-0003)を足した。人間が「推奨で」と決め、採用した。受け付けの失敗(`accept delivery`)のログは、訓練の2つの run で出た(api-down で1件、強制終了で2件)。中身が deadlock だと確かめたのは強制終了の2件。ほかに2つの run で、アウトボックスの1件だけ送信回数が多く、同じ原因と見ている(smtp-temp と、この relay-stop の前の run)
+- (決定済み、2026-11-16)notify-relay の受け付けでも、deadlock のときにやり直す(notify-relay #16)
+- 受け付けと取り出しのトランザクションを READ COMMITTED にする案(notify-relay の ADR-0003)は、MySQL 8.4 での原因が確かめられていないので、確認待ち(下)
+- 受け付けの失敗(`accept delivery`)のログは、まれではない。notify-relay のエラーを数え始めてからの8つの run のうち、次の4つで出た。中身を確かめた回(run 43850003897・43851700700・43854708852 の7件)はすべて deadlock(Error 1213)だった
+  - run 43848283354:relay-kill#1・#2、relay-stop、api-down
+  - run 43850003897:relay-kill#1
+  - run 43851700700:relay-kill#3、smtp-temp
+  - run 43854708852:api-down、relay-kill#1
+- MySQL 8.4 で、どの処理と取り合っているかは、まだ確かめていない。手元の MariaDB では取り出しと取り合う形で再現したが、MySQL 8.4 の CI では同じテストで再現しなかった。訓練のジョブのログに MySQL の deadlock の記録を出すようにした
 
-## 付録:訓練の結果(chaos/report.py の出力)
+## 付録:訓練の結果(chaos/report.py の出力をそのまま。見出しの段だけ1つ下げた)
 
 ## 障害訓練の結果:relay-stop
 
@@ -106,3 +113,7 @@ notify-relay が止まっていた。訓練で起こしたもの。
 | アウトボックスの送信の回数(回数: 件数) | {"4": "100"} |
 
 ### 警告とエラーのログ(メッセージごとの件数、上位10件)
+
+| サービス | メッセージ | 件数 |
+|---|---|---|
+| API(worker・scheduler を含む) | WARNING notify-relay did not accept the outbox message; will retry | 300 |

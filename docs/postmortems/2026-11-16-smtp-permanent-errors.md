@@ -4,7 +4,7 @@
 - 種類:障害訓練(spec 009 の AC-009-04)
 - 判定:期待どおり
 - 記録:https://github.com/yuukioda999/team-ops/actions/runs/43850003897(90日で消える)
-- 確かめたコード:team-ops a25ccd9、team-ops-api ec04c8e、notify-relay 7f60c9b
+- 確かめたコード:team-ops 9d1b2ae(PR のブランチの先頭)、team-ops-api ec04c8e(のちに作者だけを直して ecfbea5 と同じ中身)、notify-relay 7f60c9b(main)。このあと API は、送信ジョブの結果の書き方を直した(ffc3193 以降)。その版でも、同じ訓練を run 43856747950 で動かし、5種類とも期待どおりだった
 
 ## 概要
 
@@ -38,15 +38,11 @@ Mailpit が 10% の宛先に 550(恒久エラー)を返すようにした。noti
 
 戻すものはない。恒久エラーは再送しても届かないので、設計どおり再送しない(AC-R001-11)。実際の運用では、本人にメールアドレスを直してもらう(手順書に書いた)。
 
-## 気になった点
-
-- この訓練の run で、notify-relay が配信依頼の受け付けに2回失敗した(`accept delivery`、MySQL の deadlock)。この訓練の結果には影響していないが、[notify-relay の停止の振り返り](2026-11-16-relay-stopped.md)で遅れの原因になったので、そちらに書いた
-
 ## 次の手
 
 - なし(期待どおり)
 
-## 付録:訓練の結果(chaos/report.py の出力)
+## 付録:訓練の結果(chaos/report.py の出力をそのまま。見出しの段だけ1つ下げた)
 
 ## 障害訓練の結果:smtp-perm
 
@@ -102,3 +98,7 @@ Mailpit が 10% の宛先に 550(恒久エラー)を返すようにした。noti
 | アウトボックスの送信の回数(回数: 件数) | {"1": "100"} |
 
 ### 警告とエラーのログ(メッセージごとの件数、上位10件)
+
+| サービス | メッセージ | 件数 |
+|---|---|---|
+| notify-relay | INFO send attempt finished(error_code=invalid_address) | 306 |

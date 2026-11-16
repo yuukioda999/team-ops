@@ -95,6 +95,9 @@ jobs:
       - name: Keep the logs and the versions
         if: always()
         working-directory: team-ops
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           mkdir -p "$RUNNER_TEMP/result"
           docker compose -f compose.yaml -f chaos/compose.chaos.yaml logs --no-color notify-relay api-worker api-scheduler > "$RUNNER_TEMP/result/logs.txt" 2>&1 || true
@@ -103,14 +106,19 @@ jobs:
           # The errors also go to the job log, to read them without the artifact (notify-relay logs only email_ref, ADR-0003)
           echo "== notify-relay errors (first 20)"
           grep '"level":"ERROR"' "$RUNNER_TEMP/result/logs.txt" | cut -c1-600 | head -20 || true
-          # The latest deadlock InnoDB saw (which statements and locks), to explain it (notify-relay #16)
+          # The latest deadlock InnoDB saw: the statements, indexes and lock modes, to explain it
+          # (notify-relay #16). The lines with the locked rows' contents are dropped (they may hold
+          # addresses, in hex as well), and any address left in a statement is masked before cutting
           echo "== Latest deadlock in MySQL"
-          docker compose -f compose.yaml -f chaos/compose.chaos.yaml exec -T mysql mysql -uroot -proot -e 'SHOW ENGINE INNODB STATUS\G' 2>/dev/null \
-            | sed -n '/LATEST DETECTED DEADLOCK/,/^TRANSACTIONS$/p' | sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[email]/g' | cut -c1-300 | head -80 || true
+          status=$(docker compose -f compose.yaml -f chaos/compose.chaos.yaml exec -T mysql mysql -uroot -proot -e 'SHOW ENGINE INNODB STATUS\G' 2> >(grep -v 'Using a password' >&2)) || echo "(could not read the InnoDB status)"
+          deadlock=$(echo "$status" | sed -n '/LATEST DETECTED DEADLOCK/,/^TRANSACTIONS$/p' | grep -vE 'PHYSICAL RECORD|^ *[0-9]+: len ' \
+            | sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[email]/g' | cut -c1-300 | head -80)
+          echo "${deadlock:-(none)}"
           echo "== Laravel errors (first 20, without the stack traces)"
           grep -E '\.(ERROR|CRITICAL):' "$RUNNER_TEMP/result/laravel.log" 2>/dev/null | cut -c1-600 | head -20 || true
-          printf 'api_sha=%s\nrelay_sha=%s\nteam_ops_sha=%s\n' \
-            "$(git -C ../team-ops-api rev-parse HEAD)" "$(git -C ../notify-relay rev-parse HEAD)" "$(git rev-parse HEAD)" \
+          # On a pull request, the checked-out team-ops is a temporary merge commit: keep the branch's own head too
+          printf 'api_sha=%s\nrelay_sha=%s\nteam_ops_sha=%s\nteam_ops_head_sha=%s\n' \
+            "$(git -C ../team-ops-api rev-parse HEAD)" "$(git -C ../notify-relay rev-parse HEAD)" "$(git rev-parse HEAD)" "$HEAD_SHA" \
             > "$RUNNER_TEMP/result/versions.txt"
           cat "$RUNNER_TEMP/result/versions.txt"
 
