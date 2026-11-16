@@ -45,9 +45,9 @@ notify-relay が止まっていた。訓練で起こしたもの。
 
 人は notify-relay を起動し、手順書どおり `outbox:redispatch --now` を打った(AC-009-12)。送り直しは API が行った(ADR-0002・0018)。
 
-## 次の手(人間の判断が要る)
+## 次の手
 
-- notify-relay の受け付けでも、deadlock のときにやり直すようにするか(送信の取り出しと同じ作り)。受け付けの失敗(`accept delivery`)のログは、訓練の2つの run で出た(api-down で1件、強制終了で2件)。中身が deadlock だと確かめたのは強制終了の2件。ほかに2つの run で、アウトボックスの1件だけ送信回数が多く、同じ原因と見ている(smtp-temp と、この relay-stop の前の run)
+- (決定済み、2026-11-16)notify-relay の受け付けでも、deadlock のときにやり直す(notify-relay #16)。やり直しだけでは同時に走らせるテストで失敗が残ったので、受け付けと取り出しのトランザクションを READ COMMITTED にする案(notify-relay の ADR-0003)を足し、人間の確認を待っている。受け付けの失敗(`accept delivery`)のログは、訓練の2つの run で出た(api-down で1件、強制終了で2件)。中身が deadlock だと確かめたのは強制終了の2件。ほかに2つの run で、アウトボックスの1件だけ送信回数が多く、同じ原因と見ている(smtp-temp と、この relay-stop の前の run)
 
 ## 付録:訓練の結果(chaos/report.py の出力)
 
