@@ -4,7 +4,7 @@ plan.md と ADR-0025 をもとにした作業の一覧。上から順に進め�
 
 凡例:`[ops]` team-ops
 
-**進み具合(2026-11-16):T01〜T09 完了。次の手は、すぐ送り直すコマンドと結果の書き方(team-ops-api #29)、画面の注意書き(team-ops-web #23)、受け付けの deadlock(notify-relay #16)の PR にした。#16 の READ COMMITTED(notify-relay の ADR-0003)は、MySQL 8.4 での原因を確かめるまで確認待ち。マージの順番は #29・#23 → #30(#30 の E2E と訓練が、それらの変更を前提にするため)。**
+**進み具合(2026-11-16):T01〜T09 完了。次の手は、すぐ送り直すコマンドと結果の書き方(team-ops-api #29)、画面の注意書き(team-ops-web #23)、受け付けの deadlock(notify-relay #16)の PR にした。#16 の READ COMMITTED(notify-relay の ADR-0003)は、MySQL 8.4 の deadlock の記録で原因を確かめて採用した。マージの順番は #29・#23 → #30(#30 の E2E と訓練が、それらの変更を前提にするため)。**
 
 | No. | 作業 | 対象 | 受け入れ基準 |
 |---|---|---|---|

@@ -48,13 +48,13 @@ notify-relay が止まっていた。訓練で起こしたもの。
 ## 次の手
 
 - (決定済み、2026-11-16)notify-relay の受け付けでも、deadlock のときにやり直す(notify-relay #16)
-- 受け付けと取り出しのトランザクションを READ COMMITTED にする案(notify-relay の ADR-0003)は、MySQL 8.4 での原因が確かめられていないので、確認待ち(下)
-- 受け付けの失敗(`accept delivery`)のログは、まれではない。notify-relay のエラーを数え始めてからの8つの run のうち、次の4つで出た。中身を確かめた回(run 43850003897・43851700700・43854708852 の7件)はすべて deadlock(Error 1213)だった
+- (決定済み、2026-11-16)受け付けと取り出しのトランザクションを READ COMMITTED にする(notify-relay #16、notify-relay の ADR-0003)。訓練の環境の MySQL 8.4 で取った deadlock の記録で、受け付けの insert が、取り出しの UPDATE が押さえた索引のすき間を待っていたことを確かめた(run 43861779973)
+- 受け付けの失敗(`accept delivery`)のログは、まれではない。notify-relay のエラーを数え始めてからの8つの run のうち、次の4つで出た(その後の run 43861779973 でも3件)。中身を確かめた回(run 43850003897・43851700700・43854708852 の7件)はすべて deadlock(Error 1213)だった
   - run 43848283354:relay-kill#1・#2、relay-stop、api-down
   - run 43850003897:relay-kill#1
   - run 43851700700:relay-kill#3、smtp-temp
   - run 43854708852:api-down、relay-kill#1
-- MySQL 8.4 で、どの処理と取り合っているかは、まだ確かめていない。手元の MariaDB では取り出しと取り合う形で再現したが、MySQL 8.4 の CI では同じテストで再現しなかった。訓練のジョブのログに MySQL の deadlock の記録を出すようにした
+- 取り合いの相手:手元の MariaDB では取り出しと取り合う形で再現したが、MySQL 8.4 の CI では同じテストで再現しなかった。訓練のジョブのログに MySQL の deadlock の記録を出すようにし、run 43861779973 で、MySQL 8.4 でも相手が取り出し(`UPDATE ... SET status = 'sending'`)だと確かめた
 
 ## 付録:訓練の結果(chaos/report.py の出力をそのまま。見出しの段だけ1つ下げた)
 
