@@ -19,7 +19,7 @@ services:
   # HTTPS with Let's Encrypt, in front of everything. Host networking so it sees the client's real
   # IPv4 and IPv6 address (Docker's port publishing would replace IPv6 clients with its own address)
   caddy:
-    image: caddy:2.10.2
+    image: caddy:2.11.8
     network_mode: host
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env}
