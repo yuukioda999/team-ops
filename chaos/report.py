@@ -56,7 +56,16 @@ def log_summary(service: str, text: str) -> list[str]:
     """警告とエラーのログを、メッセージごとに数える(上位10件)。"""
     seen: collections.Counter[str] = collections.Counter()
     for line in text.splitlines():
-        m = re.search(r'level=(WARN|ERROR) msg="([^"]*)"', line) or re.search(r"\.(WARNING|ERROR): ([^{\[]*)", line)
+        if line.startswith("{"):  # notify-relay (JSON)。送信の失敗は INFO で、error_code が付く
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if e.get("level") in ("WARN", "ERROR") or e.get("error_code"):
+                code = f"(error_code={e['error_code']})" if e.get("error_code") else ""
+                seen[f"{e.get('level')} {str(e.get('msg', ''))[:120]}{code}"] += 1
+            continue
+        m = re.search(r"\.(WARNING|ERROR): ([^{\[]*)", line)
         if m:
             seen[f"{m.group(1)} {m.group(2).strip()[:120]}"] += 1
     return [f"| {service} | {msg} | {n} |" for msg, n in seen.most_common(10)]
