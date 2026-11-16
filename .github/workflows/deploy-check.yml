@@ -104,9 +104,38 @@ jobs:
           docker compose -f compose.prod.yaml logs api-scheduler | grep -q 'scheduler log check'
           # Alloy runs as a non-root user and lists the containers through the proxy
           test "$(docker compose -f compose.prod.yaml exec -T alloy id -u)" = 473
+          # Alloy finds the app's containers and reads their logs: its own status (127.0.0.1:12345 inside
+          # its container) lists the discovered targets and counts the log lines read. It waits up to two
+          # minutes, past the discovery's 60-second refresh, until every app service is among the targets.
+          # (An error-free log alone was not enough: a 403 from the proxy went unnoticed, 2026-11-16.)
+          # It reads the status with the API image already built here, not an image pulled for it
+          api_image=$(docker inspect -f '{{.Config.Image}}' "$(docker compose -f compose.prod.yaml ps -q api)")
+          alloy_get() { docker run --rm --network "container:$(docker compose -f compose.prod.yaml ps -q alloy)" --entrypoint php "$api_image" -r "echo file_get_contents('http://127.0.0.1:12345$1');"; }
+          services="api api-worker api-scheduler notify-relay web caddy"
+          found=
+          for i in $(seq 1 24); do
+            targets=$(alloy_get /api/v0/web/components/discovery.docker.containers || true)
+            missing=$(for s in $services; do echo "$targets" | grep -q "team-ops-demo-$s-1" || printf '%s ' "$s"; done)
+            entries=$(alloy_get /metrics | awk '/^loki_source_docker_target_entries_total/ {n += $2} END {print n + 0}' || true)
+            entries=${entries:-0}
+            echo "targets: $(echo "$targets" | grep -o 'team-ops-demo-[a-z-]*-1' | sort -u | tr '\n' ' '); app services missing: ${missing:-none}; log lines read: $entries"
+            if [ -z "$missing" ] && [ "${entries%.*}" -gt 0 ]; then found=1; break; fi
+            sleep 5
+          done
+          if [ -z "$found" ]; then
+            alloy_get /metrics | grep -E '^loki_source_docker' | head -20 || true
+            docker compose -f compose.prod.yaml logs alloy | tail -30
+            echo "Alloy did not find every app container or did not read their logs" >&2; exit 1
+          fi
+          # Errors from a discovery refresh (such as the 403) are caught by the target check above; this
+          # looks for any other error for a while once it works. Not counted:
+          # - udev, which a container cannot read (it only names the disks)
+          # - sending to Grafana Cloud, which is an unreachable address in this check
+          since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           sleep 20
-          docker compose -f compose.prod.yaml logs alloy | tail -20
-          ! docker compose -f compose.prod.yaml logs alloy | grep -iE 'permission denied|error while listing containers'
+          docker compose -f compose.prod.yaml logs --since "$since" alloy | tail -20
+          ! docker compose -f compose.prod.yaml logs --since "$since" alloy | grep 'level=error' \
+            | grep -vE 'disabling udev device properties|error sending batch|final error sending batch'
 
       - uses: actions/setup-node@v7
         with:
