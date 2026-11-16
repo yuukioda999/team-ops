@@ -103,6 +103,10 @@ jobs:
           # The errors also go to the job log, to read them without the artifact (notify-relay logs only email_ref, ADR-0003)
           echo "== notify-relay errors (first 20)"
           grep '"level":"ERROR"' "$RUNNER_TEMP/result/logs.txt" | cut -c1-600 | head -20 || true
+          # The latest deadlock InnoDB saw (which statements and locks), to explain it (notify-relay #16)
+          echo "== Latest deadlock in MySQL"
+          docker compose -f compose.yaml -f chaos/compose.chaos.yaml exec -T mysql mysql -uroot -proot -e 'SHOW ENGINE INNODB STATUS\G' 2>/dev/null \
+            | sed -n '/LATEST DETECTED DEADLOCK/,/^TRANSACTIONS$/p' | cut -c1-300 | head -80 || true
           echo "== Laravel errors (first 20, without the stack traces)"
           grep -E '\.(ERROR|CRITICAL):' "$RUNNER_TEMP/result/laravel.log" 2>/dev/null | cut -c1-600 | head -20 || true
           printf 'api_sha=%s\nrelay_sha=%s\nteam_ops_sha=%s\n' \
