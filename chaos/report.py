@@ -24,8 +24,11 @@ SEND_CONCURRENCY = 50  # notify-relay の既定(開発用の compose では変�
 
 
 def sql(query: str) -> list[list[str]]:
-    out = subprocess.run(COMPOSE + ["exec", "-T", "mysql", "mysql", "-uroot", "-proot", "-N", "-B", "-e", query],
-                         check=True, capture_output=True, text=True).stdout
+    done = subprocess.run(COMPOSE + ["exec", "-T", "mysql", "mysql", "-uroot", "-proot", "-N", "-B", "-e", query],
+                          capture_output=True, text=True)
+    if done.returncode != 0:
+        sys.exit(f"The query failed: {done.stderr.strip()}\n{query}")
+    out = done.stdout
     return [line.split("\t") for line in out.strip().splitlines() if line]
 
 
@@ -91,12 +94,12 @@ def main() -> None:
     outbox = counts("select status, count(*) from team_ops.outbox_messages group by status")
     outbox_attempts = counts("select attempts, count(*) from team_ops.outbox_messages group by attempts")
     joined, mismatch = (int(v) for v in sql(
-        "select count(*), coalesce(sum(r.status <> n.delivery_status), 0)"
+        "select count(*), coalesce(sum(binary r.status <> binary n.delivery_status), 0)"
         " from notify_relay.delivery_recipients r"
         " join notify_relay.deliveries d on d.id = r.delivery_id"
         " join team_ops.notice_recipients n"
         "   on n.notice_id = cast(substring_index(substring_index(d.dedupe_key, ':notice:', -1), ':', 1) as unsigned)"
-        "  and r.recipient_ref = convert(concat('user_', n.user_id) using utf8mb4) collate utf8mb4_bin")[0])
+        "  and binary r.recipient_ref = binary concat('user_', n.user_id)")[0])
     not_completed = int(sql("select count(*) from notify_relay.deliveries where completed_at is null")[0][0])
 
     failed = api.get("failed", 0)
