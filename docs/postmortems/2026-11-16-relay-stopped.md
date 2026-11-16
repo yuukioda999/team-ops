@@ -54,6 +54,7 @@ notify-relay が止まっていた。訓練で起こしたもの。
   - run 43850003897:relay-kill#1
   - run 43851700700:relay-kill#3、smtp-temp
   - run 43854708852:api-down、relay-kill#1
+- 直したあと:notify-relay #16 をマージしたあとの run 43865616323(notify-relay 5f9bf60)では、7つのジョブのどれにも受け付けの失敗と deadlock の記録が出なかった。1つの run だけなので、続けて訓練の結果を見る
 - 取り合いの相手:手元の MariaDB では取り出しと取り合う形で再現したが、MySQL 8.4 の CI では同じテストで再現しなかった。訓練のジョブのログに MySQL の deadlock の記録を出すようにし、run 43861779973 で、MySQL 8.4 でも相手が取り出し(`UPDATE ... SET status = 'sending'`)だと確かめた
 
 ## 付録:訓練の結果(chaos/report.py の出力をそのまま。見出しの段だけ1つ下げた)
