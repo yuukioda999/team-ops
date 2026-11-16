@@ -4,17 +4,18 @@
 
 Laravel・React・Go の4つのリポジトリで作り、**要件定義から公開・運用の準備まで、AI(Claude Code)と仕様駆動で進めた記録**をすべて公開しています。
 
-> **現在の状況(2026年11月):第1弾の機能 001〜007 が完成。** 本番と同じ構成を CI で毎日起動して確かめており、3つのイメージも GitHub のコンテナ置き場(GHCR)にそろっています。手順書どおりに VPS を用意すれば公開できます(公開先は応募の時期に合わせて用意します)。負荷試験(spec 008)を終え、障害訓練の振り返りは次に追加します。
+> **現在の状況(2026年11月):第1弾の機能 001〜007 が完成。** 本番と同じ構成を CI で毎日起動して確かめており、3つのイメージも GitHub のコンテナ置き場(GHCR)にそろっています。手順書どおりに VPS を用意すれば公開できます(公開先は応募の時期に合わせて用意します)。負荷試験(spec 008)と障害訓練(spec 009)を終えました。
 
 ## 30秒で分かること
 
 | | |
 |---|---|
 | **何を作ったか** | チームの作成と招待、名簿(CSV の一括登録)、役割と権限、お知らせ(予約送信)、既読と配信状況、未読の人への再通知、誰でも試せるデモモード |
-| **どう作ったか** | 機能ごとに 受け入れ基準 → 計画(選択肢と推奨)→ 人間が判断 → ADR → 実装 → AI のレビュー → 人間が指摘ごとに判断、の順。[ADR 24本](docs/adr/)、[機能仕様 8本](specs/)、[AI 活用の記録 9本](docs/ai-log/) |
+| **どう作ったか** | 機能ごとに 受け入れ基準 → 計画(選択肢と推奨)→ 人間が判断 → ADR → 実装 → AI のレビュー → 人間が指摘ごとに判断、の順。[ADR 25本](docs/adr/)、[機能仕様 9本](specs/)、[AI 活用の記録 10本](docs/ai-log/) |
 | **品質** | API のテスト 531件(SQLite と、CI の MySQL 8.4 の両方で実行)、画面のテスト 180件、Go のテスト(テーブル駆動、`-race` で並行処理も検証)、全サービスを通した E2E。テスト名に受け入れ基準の ID を入れて対応を追えるようにしています |
 | **設計の芯** | 個人情報を「持たない」設計(ADR-0003)、他チームのデータは必ず 404(マルチテナント)、メール配信を Go に切り出して二重配信と取りこぼしを防ぐ(ADR-0002・0019) |
 | **負荷試験** | 30万通(1万チーム)の配信を CI で測りました。全体の試験は直す前 904・931秒 → 直したあと 418・576秒で、2回とも目標の 600秒以内。relay 単体は5回中2回しか 600秒に入らず、まだ満たせていません。二重配信と取りこぼしは全回0。試したが速くならなかった変更も[そのまま記録](loadtest/README.md) |
+| **障害訓練** | 配信の途中で SMTP のエラー、配信サービスの停止と強制終了、API の停止を起こし、CI で5種類を確かめました。どれも取りこぼしは0。強制終了では、設計で受け入れた範囲(最大50通)の中で47通が二重に届いたことも、そのまま[振り返り](docs/postmortems/)に残しています |
 | **公開の準備** | FrankenPHP・Caddy・Docker Compose の本番構成、手順書、毎日の構成チェック(HTTPS で E2E、外に出ているのは Caddy だけ、バックアップから戻せる) |
 
 ## 画面
@@ -65,6 +66,7 @@ flowchart TD
 | Laravel の作り | Controller → UseCase → Model の層分け、Policy による権限、[アウトボックスと配信の依頼](https://github.com/yuukioda999/team-ops-api/tree/main/app/Support/NotifyRelay)、[配信結果の webhook の受け取りと照合](https://github.com/yuukioda999/team-ops-api/tree/main/app/UseCases/Deliveries) |
 | Go の作り | [notify-relay](https://github.com/yuukioda999/notify-relay):domain・usecase・adapter・infra の層分け、同時に送る数の上限、再送、[重複防止とデッドロック時のやり直し](https://github.com/yuukioda999/notify-relay/blob/main/internal/infra/mysqlstore/store.go)、結果の webhook のまとめ送り |
 | 負荷試験と、うまくいかなかった直し方 | [結果と次の手](loadtest/README.md)、[取り下げた ADR-0024](docs/adr/0024-publish-scheduled-notices-in-parallel.md)、[008 の ai-log](docs/ai-log/2026-11-16-008-load-test.md) |
+| 障害訓練と振り返り | [振り返りの一覧](docs/postmortems/)、[訓練の道具](chaos/)、[手順書の障害ごとの戻し方](docs/runbook/troubleshooting.md) |
 | 公開と運用の準備 | [本番の構成](deploy/)、[手順書](docs/runbook/)、[毎日の構成チェック](.github/workflows/deploy-check.yml) |
 
 ## 構成
@@ -134,7 +136,7 @@ make e2e    # 起動中の環境に対して、ブラウザで全機能の流れ
 
 `make e2e` は `DEMO_MODE=false` で動かします。デモモードの E2E は、CI と同じく `DEMO_MODE=true` にして `npx playwright test tests/007-demo-mode.spec.ts`(`e2e/` で)を実行します。
 
-障害訓練用に `make chaos-smtp`(SMTP エラーを起こす)と `make chaos-relay-down`(配信サービスを止める)があります。`make help` でコマンドの一覧を表示します。
+障害訓練は `make drill DRILL=relay-stop` のように動かします(データが空の環境で。[chaos/](chaos/))。手で障害を起こすだけなら `make chaos-smtp`(SMTP エラーを起こす)と `make chaos-relay-down`(配信サービスを止める)があります。`make help` でコマンドの一覧を表示します。
 
 ## 公開について
 
@@ -159,6 +161,7 @@ make e2e    # 起動中の環境に対して、ブラウザで全機能の流れ
 | AI 活用の記録 | [docs/ai-log/](docs/ai-log/) |
 | 運用の手順書 | [docs/runbook/](docs/runbook/) |
 | 負荷試験 | [loadtest/](loadtest/) |
+| 障害訓練の振り返り | [docs/postmortems/](docs/postmortems/) |
 | 構成・設計 | [docs/design/](docs/design/) |
 
 ## ライセンス

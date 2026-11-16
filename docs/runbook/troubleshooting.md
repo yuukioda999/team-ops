@@ -54,6 +54,22 @@ sudo du -sh /var/backups/team-ops /var/lib/docker
 - `docker compose ... exec api php artisan queue:failed` に失敗したジョブがないか
 - Mailpit が動いているか(`ps mailpit`)
 
+## メールの配信の障害(障害訓練で確かめたもの)
+
+障害訓練(spec 009)で、実際に起こして確かめた気づき方と戻し方です。結果は [docs/postmortems/](../postmortems/) にあります。DB を見るコマンドは次の形で打ちます。
+
+```sh
+docker compose -f compose.prod.yaml exec mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "<SQL>"'
+```
+
+| 障害 | 気づき方 | 戻し方 |
+|---|---|---|
+| SMTP の一時エラー(4xx、送信先が混んでいる・止まっている) | `logs notify-relay` に `"error_code":"provider_unavailable"` の行が続く。配信状況の画面で「送信中」が残る | 自動で再送する(30秒・2分・10分・30分・1時間、最大5回)。送信先が戻れば何もしなくてよい。5回とも失敗した宛先は「届かなかった」になるので、戻ったあとに未読の人への再通知を送る |
+| SMTP の恒久エラー(5xx、宛先が存在しない など) | 配信状況の画面に「届かなかった」と理由(`invalid_address` など)が出る | 再送しない(同じ宛先に何度送っても届かないため)。本人にメールアドレスを直してもらう |
+| notify-relay が止まった | `logs api-worker` に `notify-relay did not accept the outbox message; will retry` が続く。送っていないアウトボックス:`select count(*) from team_ops.outbox_messages where status<>'sent'` | notify-relay を起動する(`docker compose ... up -d notify-relay`)。送り直しは自動。ただし送り直しの間隔は30秒・1分・2分・5分・10分・30分と延びるので、長く止まっていたほど、起動してから送り始めるまで待つ(最大30分)。二重には届かない |
+| notify-relay が強制終了した(メモリ不足など) | `logs notify-relay` の起動時に `requeued recipients interrupted by a previous stop` が出る。`dmesg` に OOM の記録 | `restart: unless-stopped` で自動で起動し、残りを送る。そのとき送信中だったメールは二重に届きうる(最大で同時に送る数、既定50通)(notify-relay の ADR-0002 で受け入れた範囲)。利用者から「2通届いた」と問い合わせがあれば、この障害による |
+| API が止まり、配信結果を受け取れない | `logs notify-relay` に `webhook was not accepted; will retry` が続く。配信状況の画面で「送信中」が残る(メールは届いている) | API を戻す。notify-relay が結果を送り直す(10秒から倍々で、最大1時間おき、24時間まで)。それでも食い違えば、1時間ごとの照合(`notices:reconcile-deliveries`)が記録する |
+
 ## サーバーを作り直す
 
 1. [setup.md](setup.md) の1〜5を行う。手順5では `init-env.sh` を使わず、控えておいた `.env`・`.env.api`・`.env.relay` を置く
