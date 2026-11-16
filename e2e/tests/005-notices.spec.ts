@@ -45,7 +45,7 @@ test('AC-005-01 AC-005-02 AC-005-03 AC-005-05 AC-005-09 AC-005-10 AC-005-14 AC-0
     await representative.getByLabel('本文').fill('明日の練習は9時からです。\n地図: https://example.invalid/map')
     await representative.getByRole('radio', { name: '学年で選ぶ' }).check()
     await representative.getByRole('checkbox', { name: '小3' }).check()
-    await expect(representative.getByText('2人に届きます(あなたを含む。同じ人には1通だけ)')).toBeVisible()
+    await expect(representative.getByText('2人に届きます(あなたを含む。宛先が重なる人は1人と数える)')).toBeVisible()
     await representative.getByRole('button', { name: '2人に送信する' }).click()
     await expect(representative.getByRole('article', { name: '本文' })).toContainText('明日の練習は9時からです。')
   })

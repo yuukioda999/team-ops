@@ -1,0 +1,130 @@
+name: Chaos drill
+
+# The chaos drills of spec 009 (ADR-0025): start every service, make a fault while the notices of
+# 100 teams go out, and count what arrived. Run by hand, and on pull requests that change the drill.
+on:
+  workflow_dispatch:
+    inputs:
+      drill:
+        description: Which drill (all = the five, with the kill drill three times)
+        type: choice
+        options: [all, smtp-temp, smtp-perm, relay-stop, relay-kill, api-down]
+        default: all
+  pull_request:
+    paths: ['chaos/**', '.github/workflows/chaos.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      drills: ${{ steps.pick.outputs.drills }}
+    steps:
+      - uses: actions/checkout@v7
+      # How report.py counts and judges (spec 009 AC-009-02〜07), before anything is started
+      - name: Test the report
+        run: python3 -m unittest discover -s chaos -v
+      - id: pick
+        env:
+          DRILL: ${{ inputs.drill || 'all' }}
+        run: |
+          if [ "$DRILL" = all ]; then
+            echo 'drills=["smtp-temp","smtp-perm","relay-stop","relay-kill#1","relay-kill#2","relay-kill#3","api-down"]' >> "$GITHUB_OUTPUT"
+          else
+            echo "drills=[\"$DRILL\"]" >> "$GITHUB_OUTPUT"
+          fi
+
+  drill:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        drill: ${{ fromJSON(needs.plan.outputs.drills) }}
+    name: drill (${{ matrix.drill }})
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: team-ops
+      # A pull request uses the API branch of the same name when there is one (the drill may need it)
+      - name: Choose the API branch
+        run: |
+          ref=main
+          if [ -n "$GITHUB_HEAD_REF" ] && git ls-remote --exit-code --heads https://github.com/yuukioda999/team-ops-api "$GITHUB_HEAD_REF" > /dev/null; then ref="$GITHUB_HEAD_REF"; fi
+          echo "API_REF=$ref" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/team-ops-api
+          ref: ${{ env.API_REF }}
+          path: team-ops-api
+      # Not started, but compose.yaml refers to it
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/team-ops-web
+          path: team-ops-web
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/notify-relay
+          path: notify-relay
+
+      - name: Start the services
+        working-directory: team-ops
+        run: |
+          compose="docker compose -f compose.yaml -f chaos/compose.chaos.yaml"
+          $compose build api notify-relay
+          $compose up -d --wait mysql mailpit notify-relay api
+          $compose up -d api-worker api-scheduler
+          $compose ps
+
+      - name: Drill
+        working-directory: team-ops
+        env:
+          DRILL: ${{ matrix.drill }}
+        run: chaos/drill.sh "${DRILL%%#*}" "$RUNNER_TEMP/result"
+
+      # Fails the job when the result is not as expected (report.py exits with 1)
+      - name: Count the result
+        if: always()
+        working-directory: team-ops
+        shell: bash
+        run: python3 chaos/report.py "$RUNNER_TEMP/result" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the logs and the versions
+        if: always()
+        working-directory: team-ops
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/result"
+          docker compose -f compose.yaml -f chaos/compose.chaos.yaml logs --no-color notify-relay api-worker api-scheduler > "$RUNNER_TEMP/result/logs.txt" 2>&1 || true
+          # The API, the worker and the scheduler write the Laravel log to the mounted code (redacted, ADR-0003)
+          cp ../team-ops-api/storage/logs/laravel.log "$RUNNER_TEMP/result/" 2>/dev/null || true
+          # The errors also go to the job log, to read them without the artifact (notify-relay logs only email_ref, ADR-0003)
+          echo "== notify-relay errors (first 20)"
+          grep '"level":"ERROR"' "$RUNNER_TEMP/result/logs.txt" | cut -c1-600 | head -20 || true
+          # The latest deadlock InnoDB saw: the statements, indexes and lock modes, to explain it
+          # (notify-relay #16). The lines with the locked rows' contents are dropped (they may hold
+          # addresses, in hex as well), and any address left in a statement is masked before cutting
+          echo "== Latest deadlock in MySQL"
+          status=$(docker compose -f compose.yaml -f chaos/compose.chaos.yaml exec -T mysql mysql -uroot -proot -e 'SHOW ENGINE INNODB STATUS\G' 2> >(grep -v 'Using a password' >&2)) || echo "(could not read the InnoDB status)"
+          deadlock=$(echo "$status" | sed -n '/LATEST DETECTED DEADLOCK/,/^TRANSACTIONS$/p' | grep -vE 'PHYSICAL RECORD|^ *[0-9]+: len ' \
+            | sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[email]/g' | cut -c1-300 | head -120 || true)
+          echo "${deadlock:-(none)}"
+          echo "== Laravel errors (first 20, without the stack traces)"
+          grep -E '\.(ERROR|CRITICAL):' "$RUNNER_TEMP/result/laravel.log" 2>/dev/null | cut -c1-600 | head -20 || true
+          # On a pull request, the checked-out team-ops is a temporary merge commit: keep the branch's own head too
+          printf 'api_sha=%s\nrelay_sha=%s\nteam_ops_sha=%s\nteam_ops_head_sha=%s\n' \
+            "$(git -C ../team-ops-api rev-parse HEAD)" "$(git -C ../notify-relay rev-parse HEAD)" "$(git rev-parse HEAD)" "$HEAD_SHA" \
+            > "$RUNNER_TEMP/result/versions.txt"
+          cat "$RUNNER_TEMP/result/versions.txt"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: chaos-${{ strategy.job-index }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/result
+          retention-days: 90

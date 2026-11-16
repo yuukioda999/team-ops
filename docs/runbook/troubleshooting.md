@@ -54,6 +54,25 @@ sudo du -sh /var/backups/team-ops /var/lib/docker
 - `docker compose ... exec api php artisan queue:failed` に失敗したジョブがないか
 - Mailpit が動いているか(`ps mailpit`)
 
+## メールの配信の障害(障害訓練で確かめたもの)
+
+障害訓練(spec 009)で、実際に起こして確かめた気づき方と戻し方です。結果は [docs/postmortems/](../postmortems/) にあります。
+
+DB は、読むだけの調べものとして、スキーマごとの利用者で次の形で見ます。`READ ONLY` は書き間違いの歯止めで、書き込めない仕組みではありません(この利用者はアプリの書き込みの権限を持つ)。書き込みの SQL は打たない約束で守ります。
+
+```sh
+docker compose -f compose.prod.yaml exec mysql sh -c 'MYSQL_PWD="$TEAM_OPS_DB_PASSWORD" mysql -uteam_ops team_ops -e "SET SESSION TRANSACTION READ ONLY; <SQL>"'
+```
+
+| 障害 | 気づき方 | 戻し方 |
+|---|---|---|
+| SMTP の一時エラー(4xx。送信先が混んでいる・止まっている) | `logs notify-relay` に `"error_code":"provider_unavailable"`(452 は `rate_limited`)の行が続く。配信状況で「送信中」が残る | notify-relay が自動で再送する(30秒・2分・10分・30分・1時間の間隔で最大5回。最初の送信と合わせて最大6回)。送信先が戻れば何もしなくてよい。再送を5回しても届かなかった宛先は「届かなかった」になるので、戻ったあとに未読の人へ再通知を送る |
+| SMTP の恒久エラー(5xx) | 配信状況に「届かなかった」と理由が出る | 再送しない。理由が `invalid_address`(宛先の段階の 550・551・553・501)なら、本人にメールアドレスを直してもらう。`provider_rejected`(それ以外の 5xx)は送信先の設定や送信元の評価の問題なので、送信サービスのログを確かめる |
+| notify-relay が止まった | `logs api-worker` に `notify-relay did not accept the outbox message; will retry` が続く。送っていないアウトボックス:`select count(*) from outbox_messages where status<>'sent'` | notify-relay を起動し(`docker compose ... up -d notify-relay`)、応答を確かめてから `docker compose ... exec api php artisan outbox:redispatch --now` を打つ。これを打たないと、毎分の定期実行が拾う送り直しの時刻(間隔は約1・1・2・5・10・30分と延びる)まで待ち、長く止まっていたほど最大31分ほど遅れる。二重には届かない。24時間送れなかった依頼は諦める(アウトボックスが `failed`、理由 `gave_up`)。自動では送られないので、お知らせの画面から未読の人へ再通知を送る |
+| notify-relay が依頼の受け付けに失敗する(deadlock) | `logs notify-relay` に `"msg":"accept delivery"` と `Error 1213`。`logs api-worker` に `notify-relay did not accept the outbox message; will retry` | API が送り直すので、待てば届く(送り直しの間隔は約1・1・2・5分と延びる)。急ぐときは `outbox:redispatch --now`。続くようなら、notify-relay の不具合として調べる(障害訓練の振り返り 2026-11-16-relay-stopped) |
+| notify-relay が強制終了した(メモリ不足など) | `logs notify-relay` の起動時に `requeued recipients interrupted by a previous stop` が出る。`dmesg` に OOM の記録 | `restart: unless-stopped` で自動で起動し、残りを送る。そのとき送信中だったメールは二重に届きうる(最大で同時に送る数、既定50通。notify-relay の ADR-0002 で受け入れた範囲)。利用者から「2通届いた」と問い合わせがあれば、この障害か、未読の人への再通知(件名に【再通知】が付く)かを、時刻と件名で見分ける |
+| API が止まり、配信結果を受け取れない | `logs notify-relay` に `webhook was not accepted; will retry` が続く。配信状況で「送信中」が残る(メールは届いている) | API を戻す。notify-relay が結果を送り直す(10秒から倍々で、最大1時間おき、24時間まで)。それでも食い違えば、1時間ごとの照合(`notices:reconcile-deliveries`)がエラーのログに残す |
+
 ## サーバーを作り直す
 
 1. [setup.md](setup.md) の1〜5を行う。手順5では `init-env.sh` を使わず、控えておいた `.env`・`.env.api`・`.env.relay` を置く
