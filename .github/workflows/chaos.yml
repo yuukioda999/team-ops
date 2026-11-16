@@ -22,6 +22,10 @@ jobs:
     outputs:
       drills: ${{ steps.pick.outputs.drills }}
     steps:
+      - uses: actions/checkout@v7
+      # How report.py counts and judges (spec 009 AC-009-02〜07), before anything is started
+      - name: Test the report
+        run: python3 -m unittest discover -s chaos -v
       - id: pick
         env:
           DRILL: ${{ inputs.drill || 'all' }}
@@ -45,9 +49,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: team-ops
+      # A pull request uses the API branch of the same name when there is one (the drill may need it)
+      - name: Choose the API branch
+        run: |
+          ref=main
+          if [ -n "$GITHUB_HEAD_REF" ] && git ls-remote --exit-code --heads https://github.com/yuukioda999/team-ops-api "$GITHUB_HEAD_REF" > /dev/null; then ref="$GITHUB_HEAD_REF"; fi
+          echo "API_REF=$ref" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
           repository: yuukioda999/team-ops-api
+          ref: ${{ env.API_REF }}
           path: team-ops-api
       # Not started, but compose.yaml refers to it
       - uses: actions/checkout@v7
@@ -74,12 +85,21 @@ jobs:
           DRILL: ${{ matrix.drill }}
         run: chaos/drill.sh "${DRILL%%#*}" "$RUNNER_TEMP/result"
 
+      # Fails the job when the result is not as expected (report.py exits with 1)
       - name: Count the result
         if: always()
         working-directory: team-ops
+        shell: bash
+        run: python3 chaos/report.py "$RUNNER_TEMP/result" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the logs and the versions
+        if: always()
+        working-directory: team-ops
         run: |
-          python3 chaos/report.py "$RUNNER_TEMP/result" | tee -a "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$RUNNER_TEMP/result"
           docker compose -f compose.yaml -f chaos/compose.chaos.yaml logs --no-color notify-relay api-worker api-scheduler > "$RUNNER_TEMP/result/logs.txt" 2>&1 || true
+          # The API, the worker and the scheduler write the Laravel log to the mounted code (redacted, ADR-0003)
+          cp ../team-ops-api/storage/logs/laravel.log "$RUNNER_TEMP/result/" 2>/dev/null || true
           printf 'api_sha=%s\nrelay_sha=%s\nteam_ops_sha=%s\n' \
             "$(git -C ../team-ops-api rev-parse HEAD)" "$(git -C ../notify-relay rev-parse HEAD)" "$(git rev-parse HEAD)" \
             > "$RUNNER_TEMP/result/versions.txt"

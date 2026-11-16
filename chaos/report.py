@@ -4,12 +4,15 @@
 chaos/drill.sh のあとに、team-ops/ で動かす:
     python3 chaos/report.py <drill.sh と同じ出力先>
 
-Mailpit の宛先ごとの受信数、API の配信状況、notify-relay の宛先の状態、アウトボックスを数え、
-宛先ごとに API と notify-relay の状態を照らし合わせて、訓練ごとの期待と比べる。
-メールアドレスは出さない(数だけ)。
+宛先ごとに、Mailpit が受け取った回数、API の配信状況、notify-relay の状態を並べ(AC-009-02)、
+訓練ごとの期待と比べる。期待と違えば終了コード1で終わる。
+メールアドレスは出さない(試験用のアドレスと利用者IDの対応は <出力先>-private/ にあり、アップロードしない)。
 """
 
+from __future__ import annotations
+
 import collections
+import dataclasses
 import datetime as dt
 import json
 import pathlib
@@ -20,36 +23,94 @@ import urllib.request
 
 COMPOSE = ["docker", "compose", "-f", "compose.yaml", "-f", "chaos/compose.chaos.yaml"]
 MAILPIT = "http://127.0.0.1:8025"
-SEND_CONCURRENCY = 50  # notify-relay の既定(開発用の compose では変えていない)
+SEND_CONCURRENCY = 50  # notify-relay の既定(開発用の compose では変えていない)。判断4の二重配信の上限
 
 
-def sql(query: str) -> list[list[str]]:
-    done = subprocess.run(COMPOSE + ["exec", "-T", "mysql", "mysql", "-uroot", "-proot", "-N", "-B", "-e", query],
-                          capture_output=True, text=True)
-    if done.returncode != 0:
-        sys.exit(f"The query failed: {done.stderr.strip()}\n{query}")
-    out = done.stdout
-    return [line.split("\t") for line in out.strip().splitlines() if line]
+@dataclasses.dataclass
+class Recipient:
+    received: int = 0  # Mailpit が受け取った回数
+    api: str = "-"  # API の delivery_status(行がなければ -)
+    api_error: str = "-"
+    relay: str = "-"  # notify-relay の status(行がなければ -)
+    relay_error: str = "-"
+    attempts: int = 0  # notify-relay の送信の回数
 
 
-def counts(query: str) -> dict[str, int]:
-    return {(k if k != "NULL" else "-"): int(v) for k, v in sql(query)}
+@dataclasses.dataclass
+class Summary:
+    expected: int
+    recipients: dict[int, Recipient]
+    unknown_addresses: int = 0  # 試験データにない宛先に届いた数
+
+    def count(self, pred) -> int:
+        return sum(1 for r in self.recipients.values() if pred(r))
+
+    @property
+    def lost(self) -> int:  # 失敗と記録されずに届いていない(取りこぼし)
+        return self.count(lambda r: r.received == 0 and r.api != "failed")
+
+    @property
+    def failed_but_received(self) -> int:
+        return self.count(lambda r: r.received > 0 and r.api == "failed")
+
+    @property
+    def twice(self) -> int:
+        return self.count(lambda r: r.received >= 2)
+
+    @property
+    def extra(self) -> int:
+        return sum(r.received - 1 for r in self.recipients.values() if r.received >= 2)
+
+    @property
+    def mismatch(self) -> int:  # API と notify-relay で状態が違う
+        return self.count(lambda r: r.api != r.relay)
+
+    def status(self, side: str) -> dict[str, int]:
+        return dict(collections.Counter(getattr(r, side) for r in self.recipients.values()))
+
+    def table(self) -> list[tuple[str, str, str, int]]:
+        """宛先ごとの並び(受信回数・API・notify-relay)を、組み合わせごとの人数にまとめる(AC-009-02)。"""
+        def times(n: int) -> str:
+            return "2回以上" if n >= 2 else f"{n}回"
+        c = collections.Counter((times(r.received), r.api, r.relay) for r in self.recipients.values())
+        return [(a, b, d, n) for (a, b, d), n in sorted(c.items())]
 
 
-def mailpit_messages() -> list[dict]:
-    found, start = [], 0
-    while True:
-        with urllib.request.urlopen(f"{MAILPIT}/api/v1/messages?start={start}&limit=500", timeout=30) as r:
-            page = json.load(r)
-        found += page["messages"]
-        start += len(page["messages"])
-        if not page["messages"] or start >= page["total"]:
-            return found
-
-
-def parse(ts: str) -> dt.datetime:
-    t = dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
+def judge(scenario: str, s: Summary, facts: dict[str, str]) -> list[tuple[str, bool]]:
+    """訓練ごとの期待(spec の AC-009-03〜07)。前半は「障害が確かめたい処理の最中に当たった」こと。"""
+    f = {k: int(v) for k, v in facts.items() if v.lstrip("-").isdigit()}
+    teams, expected = f.get("teams", 0), s.expected
+    delivered = s.status("api").get("delivered", 0)
+    hit: list[tuple[str, bool]] = {
+        "smtp-temp": [("当たった:一時エラーで再送した宛先がある", s.count(lambda r: r.attempts >= 2) > 0)],
+        "smtp-perm": [("当たった:恒久エラーで失敗した宛先がある", s.status("api").get("failed", 0) > 0)],
+        "relay-stop": [("当たった:止まっている間、すべての依頼がアウトボックスに残り、1通も届いていない",
+                        f.get("unsent_outbox_while_down") == teams and f.get("mails_while_down") == 0)],
+        "relay-kill": [("当たった:送信の途中(届いた数が0より多く、全員より少ない)で止めた",
+                        0 < f.get("mails_at_kill", 0) < expected)],
+        "api-down": [("当たった:止まっている間、配信結果が API に届いていない",
+                      f.get("pending_while_down", 0) > 0)],
+    }[scenario]
+    common = [
+        ("宛先の数が API・notify-relay・試験データでそろう",
+         len(s.recipients) == expected and s.count(lambda r: r.api == "-" or r.relay == "-") == 0),
+        ("試験データにない宛先に届いていない", s.unknown_addresses == 0),
+        ("取りこぼしがない", s.lost == 0),
+        ("失敗と記録した宛先に届いていない", s.failed_but_received == 0),
+        ("API と notify-relay の状態が一致する", s.mismatch == 0),
+        ("結果の出ていない宛先がない", s.status("api").get("pending", 0) == 0),
+    ]
+    each = {
+        "smtp-temp": [("二重配信がない", s.twice == 0), ("全員に届いた", delivered == expected)],
+        "smtp-perm": [("二重配信がない", s.twice == 0),
+                      ("失敗の理由はすべて invalid_address", set(r.api_error for r in s.recipients.values() if r.api == "failed") == {"invalid_address"}),
+                      ("失敗した宛先は再送していない(送信1回)", s.count(lambda r: r.api == "failed" and r.attempts != 1) == 0)],
+        "relay-stop": [("二重配信がない", s.twice == 0), ("全員に届いた", delivered == expected)],
+        "relay-kill": [(f"二重に届いた数が同時に送る数({SEND_CONCURRENCY})以下", s.extra <= SEND_CONCURRENCY),
+                       ("全員に届いた", delivered == expected)],
+        "api-down": [("二重配信がない", s.twice == 0), ("全員に届いた", delivered == expected)],
+    }[scenario]
+    return hit + common + each
 
 
 def log_summary(service: str, text: str) -> list[str]:
@@ -71,123 +132,152 @@ def log_summary(service: str, text: str) -> list[str]:
     return [f"| {service} | {msg} | {n} |" for msg, n in seen.most_common(10)]
 
 
-def compose_logs(service: str) -> str:
-    return subprocess.run(COMPOSE + ["logs", "--no-color", "--no-log-prefix", service], capture_output=True, text=True).stdout
+# ここから下は、動いている環境を読む
+
+
+def sql(query: str) -> list[list[str]]:
+    done = subprocess.run(COMPOSE + ["exec", "-T", "mysql", "mysql", "-uroot", "-proot", "-N", "-B", "-e", query],
+                          capture_output=True, text=True)
+    if done.returncode != 0:
+        sys.exit(f"The query failed: {done.stderr.strip()}\n{query}")
+    return [line.split("\t") for line in done.stdout.strip().splitlines() if line]
+
+
+def mailpit_messages() -> list[dict]:
+    found, start = [], 0
+    while True:
+        with urllib.request.urlopen(f"{MAILPIT}/api/v1/messages?start={start}&limit=500", timeout=30) as r:
+            page = json.load(r)
+        found += page["messages"]
+        start += len(page["messages"])
+        if not page["messages"] or start >= page["total"]:
+            return found
+
+
+def parse(ts: str) -> dt.datetime:
+    t = dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
+
+
+def collect(out: pathlib.Path, expected: int) -> tuple[Summary, list[dt.datetime]]:
+    by_address: dict[str, int] = json.loads((pathlib.Path(f"{out}-private") / "recipients.json").read_text())
+    recipients = {uid: Recipient() for uid in by_address.values()}
+    unknown = 0
+    times = []
+    for m in mailpit_messages():
+        times.append(parse(m["Created"]))
+        for to in m.get("To") or []:
+            uid = by_address.get(to["Address"].lower())
+            if uid is None:
+                unknown += 1
+            else:
+                recipients[uid].received += 1
+    for uid, status, error in sql("select user_id, delivery_status, coalesce(delivery_error, '-') from team_ops.notice_recipients"):
+        r = recipients.setdefault(int(uid), Recipient())
+        r.api, r.api_error = status, error
+    for ref, status, error, attempts in sql(
+            "select recipient_ref, status, coalesce(error_code, '-'), attempts from notify_relay.delivery_recipients"):
+        if not ref.startswith("user_"):
+            continue
+        r = recipients.setdefault(int(ref[5:]), Recipient())
+        r.relay, r.relay_error, r.attempts = status, error, int(attempts)
+    return Summary(expected=expected, recipients=recipients, unknown_addresses=unknown), times
 
 
 def main() -> None:
     out = pathlib.Path(sys.argv[1])
-    env = dict(line.split("=", 1) for line in (out / "drill.env").read_text().split())
-    scenario, expected, at = env["scenario"], int(env["expected"]), parse(env["scheduled_at"])
-    timeline = (out / "timeline.txt").read_text().splitlines()
+    facts: dict[str, str] = {}
+    for line in (out / "drill.env").read_text().splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            facts[k] = v
+    scenario, expected, at = facts["scenario"], int(facts["expected"]), parse(facts["scheduled_at"])
+    s, times = collect(out, expected)
+    checks = judge(scenario, s, facts)
+    ok = all(passed for _, passed in checks)
 
-    # Mailpit:宛先ごとの受信数
-    messages = mailpit_messages()
-    per_address: collections.Counter[str] = collections.Counter()
-    times = []
-    for m in messages:
-        for to in m.get("To") or []:
-            per_address[to["Address"].lower()] += 1
-        times.append(parse(m["Created"]))
-    received_once = sum(1 for n in per_address.values() if n == 1)
-    twice = sum(1 for n in per_address.values() if n >= 2)
-    extra = sum(n - 1 for n in per_address.values() if n >= 2)
-    unique = len(per_address)
+    def epoch(key: str) -> dt.datetime | None:
+        return dt.datetime.fromtimestamp(int(facts[key]), dt.timezone.utc) if key in facts else None
 
-    api = counts("select delivery_status, count(*) from team_ops.notice_recipients group by delivery_status")
-    api_err = counts("select delivery_error, count(*) from team_ops.notice_recipients where delivery_status<>'delivered' group by delivery_error")
-    relay = counts("select status, count(*) from notify_relay.delivery_recipients group by status")
-    relay_err = counts("select error_code, count(*) from notify_relay.delivery_recipients where status<>'delivered' group by error_code")
-    relay_attempts = counts("select attempts, count(*) from notify_relay.delivery_recipients group by attempts")
-    failed_attempts = counts("select attempts, count(*) from notify_relay.delivery_recipients where status='failed' group by attempts")
-    outbox = counts("select status, count(*) from team_ops.outbox_messages group by status")
-    outbox_attempts = counts("select attempts, count(*) from team_ops.outbox_messages group by attempts")
-    joined, mismatch = (int(v) for v in sql(
-        "select count(*), coalesce(sum(binary r.status <> binary n.delivery_status), 0)"
-        " from notify_relay.delivery_recipients r"
-        " join notify_relay.deliveries d on d.id = r.delivery_id"
-        " join team_ops.notice_recipients n"
-        "   on n.notice_id = cast(substring_index(substring_index(d.dedupe_key, ':notice:', -1), ':', 1) as unsigned)"
-        "  and binary r.recipient_ref = binary concat('user_', n.user_id)")[0])
-    not_completed = int(sql("select count(*) from notify_relay.deliveries where completed_at is null")[0][0])
-
-    failed = api.get("failed", 0)
-    missing = expected - unique - failed  # 失敗と記録されずに届いていない宛先
-    fault_off = next((parse(f"{at.date()}T{line[:8]}Z") for line in reversed(timeline) if "fault off" in line), None)
-    first, last = (min(times), max(times)) if times else (None, None)
-
-    def secs(a, b):
+    def secs(a: dt.datetime | None, b: dt.datetime | None) -> str:
         return "-" if a is None or b is None else f"{(b - a).total_seconds():.0f} 秒"
 
-    left_sending = None
-    for line in timeline:
-        m = re.search(r"recipients left sending: (\d+)", line)
-        if m:
-            left_sending = int(m.group(1))
+    first, last = (min(times), max(times)) if times else (None, None)
+    published = sql("select min(published_at), max(published_at) from team_ops.notices where status='published'")[0]
+    timing = [
+        ("予約の時刻から最初の1通", secs(at, first)),
+        ("予約の時刻から最後の1通", secs(at, last)),
+        ("予約の時刻から最初と最後の公開", f"{secs(at, parse(published[0]))}・{secs(at, parse(published[1]))}" if published[0] != "NULL" else "-"),
+    ]
+    timing += {
+        "smtp-temp": [("障害を止めてから最後の1通", secs(epoch("fault_off"), last))],
+        "smtp-perm": [],
+        "relay-stop": [("notify-relay が応答できるようになってから最後の1通", secs(epoch("fault_off"), last))],
+        "relay-kill": [("notify-relay の起動から最後の1通", secs(epoch("fault_off"), last))],
+        "api-down": [("API が応答できるようになってから配信状況がそろうまで(2秒おきに確かめた)", secs(epoch("fault_off"), epoch("all_final")))],
+    }[scenario]
 
-    base = missing == 0 and api.get("pending", 0) == 0 and mismatch == 0 and joined == expected
-    checks = {
-        "smtp-temp": base and twice == 0 and api.get("delivered", 0) == expected,
-        "smtp-perm": base and twice == 0 and failed > 0 and failed == relay.get("failed", 0) == expected - unique
-        and set(failed_attempts) == {"1"},
-        "relay-stop": base and twice == 0 and api.get("delivered", 0) == expected,
-        # 判断4:二重に届いた数が、同時に送る数(SEND_CONCURRENCY、50)以下なら設計どおり
-        "relay-kill": base and extra <= SEND_CONCURRENCY,
-        "api-down": base and twice == 0 and api.get("delivered", 0) == expected,
-    }
-    ok = checks[scenario]
+    timeline = (out / "timeline.txt").read_text().splitlines()
+    timeline = sorted(timeline + [f"{at:%H:%M:%S} 予約の時刻(お知らせの公開)"])
+
+    attempts = collections.Counter(r.attempts for r in s.recipients.values())
+    outbox = dict(sql("select status, count(*) from team_ops.outbox_messages group by status"))
+    outbox_attempts = dict(sql("select attempts, count(*) from team_ops.outbox_messages group by attempts"))
 
     lines = [
         f"# 障害訓練の結果:{scenario}",
         "",
         f"判定:**{'期待どおり' if ok else '期待と違う(振り返りで原因を調べる)'}**",
         "",
+        "| 確かめたこと | 結果 |",
+        "|---|---|",
+        *[f"| {name} | {'はい' if passed else '**いいえ**'} |" for name, passed in checks],
+        "",
         "## 時系列(UTC)",
         "",
         "```",
-        f"{at:%H:%M:%S} 予約の時刻(お知らせの公開)",
         *timeline,
         "```",
         "",
-        "## メール(Mailpit)",
+        "## 宛先ごとの並び(AC-009-02)",
+        "",
+        "宛先ごとに、受け取った回数・API の配信状況・notify-relay の状態をつなぎ、組み合わせごとの人数にまとめた。",
+        "",
+        "| 受け取った回数 | API | notify-relay | 人数 |",
+        "|---|---|---|---|",
+        *[f"| {a} | {b} | {d} | {n:,} |" for a, b, d, n in s.table()],
         "",
         "| 項目 | 値 |",
         "|---|---|",
         f"| 届くはずの宛先 | {expected:,} |",
-        f"| 1通以上届いた宛先 | {unique:,} |",
-        f"| ちょうど1通届いた宛先 | {received_once:,} |",
-        f"| 2通以上届いた宛先(二重配信) | {twice:,}(余分に届いたのは {extra:,} 通) |",
-        f"| 失敗と記録されずに届いていない宛先(取りこぼし) | {missing:,} |",
-        f"| 予約の時刻から最初の1通 | {secs(at, first)} |",
-        f"| 予約の時刻から最後の1通 | {secs(at, last)} |",
-        f"| 障害を止めてから最後の1通 | {secs(fault_off, last)} |",
-        "",
-        "## 配信状況の照らし合わせ",
-        "",
-        "| 項目 | 値 |",
-        "|---|---|",
-        f"| API の配信状況 | {json.dumps(api, ensure_ascii=False)} |",
-        f"| API の届かなかった理由 | {json.dumps(api_err, ensure_ascii=False)} |",
-        f"| notify-relay の宛先の状態 | {json.dumps(relay, ensure_ascii=False)} |",
-        f"| notify-relay のエラーの種類 | {json.dumps(relay_err, ensure_ascii=False)} |",
-        f"| notify-relay の送信の回数(回数: 宛先の数) | {json.dumps(relay_attempts, ensure_ascii=False)} |",
-        f"| failed になった宛先の送信の回数 | {json.dumps(failed_attempts, ensure_ascii=False)} |",
-        f"| 宛先ごとに API と notify-relay をつないだ数 | {joined:,}(状態が食い違う宛先 {mismatch:,}) |",
-        f"| notify-relay で完了していない依頼 | {not_completed:,} |",
+        f"| 2通以上届いた宛先(二重配信) | {s.twice:,}(余分に届いたのは {s.extra:,} 通) |",
+        f"| 失敗と記録されずに届いていない宛先(取りこぼし) | {s.lost:,} |",
+        f"| 失敗と記録したのに届いた宛先 | {s.failed_but_received:,} |",
+        f"| API と notify-relay で状態が違う宛先 | {s.mismatch:,} |",
+        f"| 試験データにない宛先に届いた数 | {s.unknown_addresses:,} |",
+        *[f"| {name} | {value} |" for name, value in timing],
+        f"| API の届かなかった理由 | {json.dumps(collections.Counter(r.api_error for r in s.recipients.values() if r.api == 'failed'), ensure_ascii=False)} |",
+        f"| notify-relay の送信の回数(回数: 宛先の数) | {json.dumps(dict(sorted(attempts.items())), ensure_ascii=False)} |",
         f"| アウトボックスの状態 | {json.dumps(outbox, ensure_ascii=False)} |",
         f"| アウトボックスの送信の回数(回数: 件数) | {json.dumps(outbox_attempts, ensure_ascii=False)} |",
     ]
-    if left_sending is not None:
-        lines.append(f"| 強制終了のあとに sending のまま残った宛先 | {left_sending:,}(取り出した分で、送ったかどうかは問わない。起動時に pending に戻る) |")
-        lines.append(f"| 二重配信の上限(同時に送る数) | {SEND_CONCURRENCY} |")
+    if "left_sending" in facts:
+        lines.append(f"| 強制終了のあとに sending のまま残った宛先 | {int(facts['left_sending']):,}(取り出した分で、送ったかどうかは問わない。起動時に pending に戻る) |")
     lines += ["", "## 警告とエラーのログ(メッセージごとの件数、上位10件)", "", "| サービス | メッセージ | 件数 |", "|---|---|---|"]
-    lines += log_summary("notify-relay", compose_logs("notify-relay"))
-    # API・worker・scheduler は、開発用の構成では同じファイル(マウントしたコードの storage/logs)に書く
+    relay_log = subprocess.run(COMPOSE + ["logs", "--no-color", "--no-log-prefix", "notify-relay"], capture_output=True, text=True).stdout
+    lines += log_summary("notify-relay", relay_log)
+    # API・worker・scheduler は、開発用の構成では同じファイル(マウントしたコードの storage/logs)に書く。訓練の分だけ数える
     laravel = pathlib.Path("../team-ops-api/storage/logs/laravel.log")
-    lines += log_summary("API(worker・scheduler を含む)", laravel.read_text(errors="replace") if laravel.exists() else "")
-    text = "\n".join(lines) + "\n"
-    (out / "report.md").write_text(text)
-    print(text)
+    text = ""
+    if laravel.exists():
+        with laravel.open("rb") as fh:
+            fh.seek(int(facts.get("laravel_log_offset", "0")))
+            text = fh.read().decode(errors="replace")
+    lines += log_summary("API(worker・scheduler を含む)", text)
+    report = "\n".join(lines) + "\n"
+    (out / "report.md").write_text(report)
+    print(report)
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":
