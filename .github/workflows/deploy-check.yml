@@ -104,10 +104,32 @@ jobs:
           docker compose -f compose.prod.yaml logs api-scheduler | grep -q 'scheduler log check'
           # Alloy runs as a non-root user and lists the containers through the proxy
           test "$(docker compose -f compose.prod.yaml exec -T alloy id -u)" = 473
+          # Alloy finds the containers and reads their logs: its own status (127.0.0.1:12345 inside its
+          # container) shows the discovered containers and the log lines read, for up to 90 seconds.
+          # (An error-free log alone was not enough: a 403 from the proxy went unnoticed, 2026-11-16)
+          alloy_get() { docker run --rm --network "container:$(docker compose -f compose.prod.yaml ps -q alloy)" curlimages/curl:8.11.1 -fsS "http://127.0.0.1:12345$1"; }
+          found=
+          for i in $(seq 1 18); do
+            targets=$(alloy_get /api/v0/web/components/discovery.docker.containers | grep -o '__meta_docker_container_name' | wc -l || true)
+            entries=$(alloy_get /metrics | awk '/^loki_source_docker_target_entries_total/ {n += $2} END {print n + 0}' || true)
+            echo "containers found: $targets, log lines read: $entries"
+            entries=${entries:-0}
+            if [ "${targets:-0}" -gt 0 ] && [ "${entries%.*}" -gt 0 ]; then found=1; break; fi
+            sleep 5
+          done
+          if [ -z "$found" ]; then
+            alloy_get /metrics | grep -E '^loki_source_docker' | head -20 || true
+            docker compose -f compose.prod.yaml logs alloy | tail -30
+            echo "Alloy did not find the containers or read their logs" >&2; exit 1
+          fi
+          # Once it works, no error for a while. Not counted:
+          # - udev, which a container cannot read (it only names the disks)
+          # - sending to Grafana Cloud, which is an unreachable address in this check
+          since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           sleep 20
-          docker compose -f compose.prod.yaml logs alloy | tail -20
-          # Any error fails the check, except the one about udev, which a container cannot read (disk names only)
-          ! docker compose -f compose.prod.yaml logs alloy | grep 'level=error' | grep -v 'disabling udev device properties'
+          docker compose -f compose.prod.yaml logs --since "$since" alloy | tail -20
+          ! docker compose -f compose.prod.yaml logs --since "$since" alloy | grep 'level=error' \
+            | grep -vE 'disabling udev device properties|error sending batch|final error sending batch'
 
       - uses: actions/setup-node@v7
         with:

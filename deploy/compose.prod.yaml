@@ -181,15 +181,21 @@ services:
     restart: unless-stopped
     logging: *logging
 
-  # Alloy reads the container list and logs through this proxy instead of the Docker socket itself:
-  # only reading containers and networks is allowed, so it cannot start, change or exec into containers
-  # (Alloy's container discovery also reads the networks, for their labels; without them it finds nothing)
+  # Alloy reads the container list and logs through this proxy instead of the Docker socket itself.
+  # Only GET is allowed (POST: 0), so it cannot start, change or exec into containers. What Alloy needs:
+  # - CONTAINERS: the list, each container's details and logs. The details include the environment
+  #   variables (secrets from .env.api and .env.relay), so a compromised Alloy could read them (ADR-0022)
+  # - NETWORKS: the container discovery reads the networks for their labels; without it, it finds nothing
+  # - PING and VERSION: the Docker API version handshake
   docker-api:
     image: tecnativa/docker-socket-proxy:v0.5.0
     profiles: [monitoring]
     environment:
       CONTAINERS: 1
       NETWORKS: 1
+      PING: 1
+      VERSION: 1
+      EVENTS: 0 # on by default, not used
       POST: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
