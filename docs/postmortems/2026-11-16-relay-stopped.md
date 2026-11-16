@@ -39,7 +39,7 @@
 
 notify-relay が止まっていた。訓練で起こしたもの。
 
-前の run の遅れの原因の見立て:起動の直後に100件の依頼が一度に届くと、notify-relay の受け付け(依頼と宛先の行の insert)が、送信の取り出し(宛先の行のロック)と MySQL の deadlock になることがある。後の run で、エラーの行(`accept delivery`、`Error 1213 Deadlock found`)を確かめた。notify-relay は送信の取り出しでは deadlock をやり直すが、受け付けではやり直さずに 500 を返す。API はそれを一時的な失敗として扱い、送り直しの間隔(このときは5分)を待った。前の run ではエラーの行を出していなかったので、遅れの1件が deadlock だったことは確かめていない。
+前の run の遅れの原因の見立て:起動の直後に100件の依頼が一度に届くと、notify-relay の受け付け(依頼と宛先の行の insert)が、送信の取り出し(宛先の行のロック)と MySQL の deadlock になることがある。後の run で、エラーの行(`accept delivery`、`Error 1213 Deadlock found`)を確かめた。notify-relay は送信の取り出しでは deadlock をやり直すが、受け付けではやり直さずに 503 を返す。API はそれを一時的な失敗として扱い、送り直しの間隔(このときは5分)を待った。前の run ではエラーの行を出していなかったので、遅れの1件が deadlock だったことは確かめていない。
 
 ## どう戻したか
 
@@ -47,7 +47,7 @@ notify-relay が止まっていた。訓練で起こしたもの。
 
 ## 次の手
 
-- (決定済み、2026-11-16)notify-relay の受け付けでも、deadlock のときにやり直す(notify-relay #16)。やり直しだけでは同時に走らせるテストで失敗が残ったので、受け付けと取り出しのトランザクションを READ COMMITTED にする案(notify-relay の ADR-0003)を足し、人間の確認を待っている。受け付けの失敗(`accept delivery`)のログは、訓練の2つの run で出た(api-down で1件、強制終了で2件)。中身が deadlock だと確かめたのは強制終了の2件。ほかに2つの run で、アウトボックスの1件だけ送信回数が多く、同じ原因と見ている(smtp-temp と、この relay-stop の前の run)
+- (決定済み、2026-11-16)notify-relay の受け付けでも、deadlock のときにやり直す(notify-relay #16)。やり直しだけでは同時に走らせるテストで失敗が残ったので、受け付けと取り出しのトランザクションを READ COMMITTED にする案(notify-relay の ADR-0003)を足した。人間が「推奨で」と決め、採用した。受け付けの失敗(`accept delivery`)のログは、訓練の2つの run で出た(api-down で1件、強制終了で2件)。中身が deadlock だと確かめたのは強制終了の2件。ほかに2つの run で、アウトボックスの1件だけ送信回数が多く、同じ原因と見ている(smtp-temp と、この relay-stop の前の run)
 
 ## 付録:訓練の結果(chaos/report.py の出力)
 

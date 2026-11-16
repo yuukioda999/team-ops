@@ -28,7 +28,7 @@ test('AC-006-01 AC-006-03 AC-006-04 AC-006-05 AC-006-08 AC-006-11 AC-006-12 resu
     await representative.getByRole('link', { name: 'お知らせを書く' }).click()
     await representative.getByLabel('タイトル').fill(title)
     await representative.getByLabel('本文').fill('日曜は9時集合です。')
-    await expect(representative.getByText('3人に届きます(あなたを含む。同じ人には1通だけ)')).toBeVisible()
+    await expect(representative.getByText('3人に届きます(あなたを含む。宛先が重なる人も1人と数えます)')).toBeVisible()
     await representative.getByRole('button', { name: '3人に送信する' }).click()
     await expect(representative.getByRole('article', { name: '本文' })).toBeVisible()
     await waitForSubject(readerEmail, subject)
