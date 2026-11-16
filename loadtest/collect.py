@@ -70,7 +70,7 @@ def cpu_table(path: pathlib.Path) -> list[str]:
                 break
     if not cpu:
         return []
-    lines = ["", "## CPU とメモリ(5秒ごとの docker stats。CPU の 100% は1コア分)", "",
+    lines = ["", "## CPU とメモリ(5秒ごとの docker stats。CPU の 100% は1コア分。k6 はコンテナの外で動くので含まない)", "",
              "| コンテナ | CPU の平均 | CPU の最大 | メモリの最大 |", "|---|---|---|---|"]
     for name in sorted(cpu):
         v = cpu[name]
