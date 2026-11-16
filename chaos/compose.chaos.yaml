@@ -1,0 +1,20 @@
+# The chaos drills (spec 009, ADR-0025), on top of ../compose.yaml:
+#   docker compose -f compose.yaml -f chaos/compose.chaos.yaml up -d
+# Mailpit keeps every mail (it drops the oldest past 500 by default), so that each address can be
+# counted, and the API can create the drill data with loadtest:seed.
+
+services:
+  mailpit:
+    environment:
+      MP_MAX_MESSAGES: "0" # no limit
+
+  api:
+    environment:
+      # loadtest:seed (spec 008) runs only with this; the production settings never set it
+      LOADTEST_SEED_ENABLED: "true"
+
+  # Not used by the drills
+  web:
+    profiles: [unused]
+  otel-lgtm:
+    profiles: [unused]

@@ -1,0 +1,93 @@
+name: Chaos drill
+
+# The chaos drills of spec 009 (ADR-0025): start every service, make a fault while the notices of
+# 100 teams go out, and count what arrived. Run by hand, and on pull requests that change the drill.
+on:
+  workflow_dispatch:
+    inputs:
+      drill:
+        description: Which drill (all = the five, with the kill drill three times)
+        type: choice
+        options: [all, smtp-temp, smtp-perm, relay-stop, relay-kill, api-down]
+        default: all
+  pull_request:
+    paths: ['chaos/**', '.github/workflows/chaos.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      drills: ${{ steps.pick.outputs.drills }}
+    steps:
+      - id: pick
+        env:
+          DRILL: ${{ inputs.drill || 'all' }}
+        run: |
+          if [ "$DRILL" = all ]; then
+            echo 'drills=["smtp-temp","smtp-perm","relay-stop","relay-kill#1","relay-kill#2","relay-kill#3","api-down"]' >> "$GITHUB_OUTPUT"
+          else
+            echo "drills=[\"$DRILL\"]" >> "$GITHUB_OUTPUT"
+          fi
+
+  drill:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        drill: ${{ fromJSON(needs.plan.outputs.drills) }}
+    name: drill (${{ matrix.drill }})
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: team-ops
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/team-ops-api
+          path: team-ops-api
+      # Not started, but compose.yaml refers to it
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/team-ops-web
+          path: team-ops-web
+      - uses: actions/checkout@v7
+        with:
+          repository: yuukioda999/notify-relay
+          path: notify-relay
+
+      - name: Start the services
+        working-directory: team-ops
+        run: |
+          compose="docker compose -f compose.yaml -f chaos/compose.chaos.yaml"
+          $compose build api notify-relay
+          $compose up -d --wait mysql mailpit notify-relay api
+          $compose up -d api-worker api-scheduler
+          $compose ps
+
+      - name: Drill
+        working-directory: team-ops
+        env:
+          DRILL: ${{ matrix.drill }}
+        run: chaos/drill.sh "${DRILL%%#*}" "$RUNNER_TEMP/result"
+
+      - name: Count the result
+        if: always()
+        working-directory: team-ops
+        run: |
+          python3 chaos/report.py "$RUNNER_TEMP/result" | tee -a "$GITHUB_STEP_SUMMARY"
+          docker compose -f compose.yaml -f chaos/compose.chaos.yaml logs --no-color notify-relay api-worker api-scheduler > "$RUNNER_TEMP/result/logs.txt" 2>&1 || true
+          printf 'api_sha=%s\nrelay_sha=%s\nteam_ops_sha=%s\n' \
+            "$(git -C ../team-ops-api rev-parse HEAD)" "$(git -C ../notify-relay rev-parse HEAD)" "$(git rev-parse HEAD)" \
+            > "$RUNNER_TEMP/result/versions.txt"
+          cat "$RUNNER_TEMP/result/versions.txt"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: chaos-${{ strategy.job-index }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/result
+          retention-days: 90

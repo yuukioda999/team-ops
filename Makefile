@@ -4,7 +4,7 @@ GITHUB   := https://github.com/yuukioda999
 COMPOSE  := docker compose
 
 .PHONY: help setup up down restart logs ps test test-api test-web test-relay e2e demo-reset \
-        chaos-smtp chaos-smtp-off chaos-relay-down chaos-relay-up config
+        chaos-smtp chaos-smtp-off chaos-relay-down chaos-relay-up drill config
 
 help: ## Show available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -72,3 +72,10 @@ chaos-relay-down: ## Stop notify-relay: notices queue up in the API outbox
 
 chaos-relay-up: ## Start notify-relay again: queued notices are delivered once
 	$(COMPOSE) start notify-relay
+
+drill: ## Run a chaos drill (spec 009): make drill DRILL=smtp-temp|smtp-perm|relay-stop|relay-kill|api-down
+	@[ -n "$(DRILL)" ] || { echo "Set DRILL, e.g. make drill DRILL=relay-stop"; exit 2; }
+	docker compose -f compose.yaml -f chaos/compose.chaos.yaml up -d --build --wait mysql mailpit notify-relay api
+	docker compose -f compose.yaml -f chaos/compose.chaos.yaml up -d api-worker api-scheduler
+	chaos/drill.sh $(DRILL) chaos/out/$(DRILL)
+	python3 chaos/report.py chaos/out/$(DRILL)
