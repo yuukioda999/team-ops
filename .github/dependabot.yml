@@ -22,3 +22,8 @@ updates:
     directory: /deploy
     schedule:
       interval: weekly
+    ignore:
+      # MySQL stays on the LTS 8.4, as in development and CI. 26.x failed the restore in the deploy check
+      # (GTID_PURGED); raise it by hand together with the other compose files
+      - dependency-name: mysql
+        update-types: ["version-update:semver-major"]
