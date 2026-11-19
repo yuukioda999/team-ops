@@ -14,6 +14,7 @@
 | 007 | デモモード | [007-demo-mode/spec.md](007-demo-mode/spec.md) |
 | 008 | 負荷試験 | [008-load-test/spec.md](008-load-test/spec.md) |
 | 009 | 障害訓練と振り返り | [009-chaos-drill/spec.md](009-chaos-drill/spec.md) |
+| 010 | 監視:トレースとメトリクス | [010-observability/spec.md](010-observability/spec.md) |
 
 notify-relay(Go)側の仕様は [notify-relay の specs/](https://github.com/yuukioda999/notify-relay/tree/main/specs) にある。
 
