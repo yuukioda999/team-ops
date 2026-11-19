@@ -74,9 +74,19 @@ jobs:
         run: |
           sed -i 's/^DEMO_MODE=false/DEMO_MODE=true/' env/api.env
           docker compose up -d --force-recreate api api-worker api-scheduler
+          # Wait through the web's proxy too, which is what the browser uses: after the API is recreated,
+          # the proxy's first requests can still fail, and the login page then shows no demo login (seen once,
+          # 2026-11-16). Three answers in a row, so that a single lucky one is not enough
+          ok=0
           for i in $(seq 1 60); do
-            if curl -fsS http://localhost:8000/api/demo > /dev/null; then echo "demo mode on"; exit 0; fi
-            sleep 5
+            if curl -fsS http://localhost:8000/api/demo > /dev/null && curl -fsS http://localhost:5173/api/demo > /dev/null; then
+              ok=$((ok + 1))
+              if [ "$ok" -ge 3 ]; then echo "demo mode on"; exit 0; fi
+              sleep 1
+            else
+              ok=0
+              sleep 5
+            fi
           done
           echo "demo mode did not come up"; exit 1
 
