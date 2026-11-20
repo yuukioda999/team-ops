@@ -188,7 +188,7 @@ services:
   # - NETWORKS: the container discovery reads the networks for their labels; without it, it finds nothing
   # - PING and VERSION: the Docker API version handshake
   docker-api:
-    image: tecnativa/docker-socket-proxy:v0.5.0
+    image: tecnativa/docker-socket-proxy:3.4
     profiles: [monitoring]
     environment:
       CONTAINERS: 1
