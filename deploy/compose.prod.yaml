@@ -138,7 +138,7 @@ services:
   # Catches every mail of the demo; the "送信されたメール" screen reads it through the API (ADR-0021).
   # Its web page and SMTP are never published
   mailpit:
-    image: axllent/mailpit:v1.33.1
+    image: axllent/mailpit:v1.34.0
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: "true"
       MP_SMTP_AUTH_ALLOW_INSECURE: "true"
